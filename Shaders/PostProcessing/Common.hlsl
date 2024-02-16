@@ -2,42 +2,7 @@
 #define UNIVERSAL_POSTPROCESSING_COMMON_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Fullscreen.hlsl"
-
-// ----------------------------------------------------------------------------------
-// Render fullscreen mesh by using a matrix set directly by the pipeline instead of
-// relying on the matrix set by the C++ engine to avoid issues with XR
-
-float4x4 _FullscreenProjMat;
-
-float4 TransformFullscreenMesh(half3 positionOS)
-{
-    return mul(_FullscreenProjMat, half4(positionOS, 1));
-}
-
-Varyings VertFullscreenMesh(Attributes input)
-{
-    Varyings output;
-    UNITY_SETUP_INSTANCE_ID(input);
-    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-
-#if _USE_DRAW_PROCEDURAL
-    GetProceduralQuad(input.vertexID, output.positionCS, output.uv);
-#else
-    output.positionCS = TransformFullscreenMesh(input.positionOS.xyz);
-    output.uv = input.uv;
-#endif
-
-    return output;
-}
-
-// ----------------------------------------------------------------------------------
-// Samplers
-
-SAMPLER(sampler_LinearClamp);
-SAMPLER(sampler_LinearRepeat);
-SAMPLER(sampler_PointClamp);
-SAMPLER(sampler_PointRepeat);
+#include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 
 // ----------------------------------------------------------------------------------
 // Utility functions
@@ -165,7 +130,7 @@ half3 ApplyColorGrading(half3 input, float postExposure, TEXTURE2D_PARAM(lutTex,
     return input;
 }
 
-half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSampler), float intensity, float response, float2 scale, float2 offset)
+half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSampler), float intensity, float response, float2 scale, float2 offset, float oneOverPaperWhite)
 {
     // Grain in range [0;1] with neutral at 0.5
     half grain = SAMPLE_TEXTURE2D(GrainTexture, GrainSampler, uv * scale + offset).w;
@@ -174,13 +139,17 @@ half3 ApplyGrain(half3 input, float2 uv, TEXTURE2D_PARAM(GrainTexture, GrainSamp
     grain = (grain - 0.5) * 2.0;
 
     // Noisiness response curve based on scene luminance
-    float lum = 1.0 - sqrt(Luminance(input));
+    float lum = Luminance(input);
+    #ifdef HDR_INPUT
+    lum *= oneOverPaperWhite;
+    #endif
+    lum = 1.0 - sqrt(lum);
     lum = lerp(1.0, lum, response);
 
     return input + input * grain * intensity * lum;
 }
 
-half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, BlueNoiseSampler), float2 scale, float2 offset)
+half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, BlueNoiseSampler), float2 scale, float2 offset, float paperWhite, float oneOverPaperWhite)
 {
     // Symmetric triangular distribution on [-1,1] with maximal density at 0
     float noise = SAMPLE_TEXTURE2D(BlueNoiseTexture, BlueNoiseSampler, uv * scale + offset).a * 2.0 - 1.0;
@@ -188,11 +157,112 @@ half3 ApplyDithering(half3 input, float2 uv, TEXTURE2D_PARAM(BlueNoiseTexture, B
 
 #if UNITY_COLORSPACE_GAMMA
     input += noise / 255.0;
+#elif defined(HDR_INPUT)
+    input = input * oneOverPaperWhite;
+    // Do not call GetSRGBToLinear/GetLinearToSRGB because the "fast" version will clamp values!
+    input = SRGBToLinear(LinearToSRGB(input) + noise / 255.0);
+    input = input * paperWhite;
 #else
     input = GetSRGBToLinear(GetLinearToSRGB(input) + noise / 255.0);
 #endif
 
     return input;
+}
+
+#define FXAA_SPAN_MAX   (8.0)
+#define FXAA_REDUCE_MUL (1.0 / 8.0)
+#define FXAA_REDUCE_MIN (1.0 / 128.0)
+
+half3 FXAAFetch(float2 coords, float2 offset, TEXTURE2D_X(inputTexture))
+{
+    float2 uv = coords + offset;
+    return SAMPLE_TEXTURE2D_X(inputTexture, sampler_LinearClamp, uv).xyz;
+}
+
+half3 FXAALoad(int2 icoords, int idx, int idy, float4 sourceSize, TEXTURE2D_X(inputTexture))
+{
+    #if SHADER_API_GLES
+    float2 uv = (icoords + int2(idx, idy)) * sourceSize.zw;
+    return SAMPLE_TEXTURE2D_X(inputTexture, sampler_PointClamp, uv).xyz;
+    #else
+    return LOAD_TEXTURE2D_X(inputTexture, clamp(icoords + int2(idx, idy), 0, sourceSize.xy - 1.0)).xyz;
+    #endif
+}
+
+half3 ApplyFXAA(half3 color, float2 positionNDC, int2 positionSS, float4 sourceSize, TEXTURE2D_X(inputTexture), float paperWhite, float oneOverPaperWhite)
+{
+    // Edge detection
+    half3 rgbNW = FXAALoad(positionSS, -1, -1, sourceSize, inputTexture);
+    half3 rgbNE = FXAALoad(positionSS,  1, -1, sourceSize, inputTexture);
+    half3 rgbSW = FXAALoad(positionSS, -1,  1, sourceSize, inputTexture);
+    half3 rgbSE = FXAALoad(positionSS,  1,  1, sourceSize, inputTexture);
+
+    #ifdef HDR_INPUT
+        // The pixel values we have are already tonemapped but in the range [0, 10000] nits. To run FXAA properly, we need to convert them
+        // to a SDR range [0; 1]. Since the tonemapped values are not evenly distributed and mostly close to the paperWhite nits value, we can
+        // normalize by paperWhite to get most of the scene in [0; 1] range. For the remaining pixels, we can use the FastTonemap() to remap
+        // them to [0, 1] range.
+        float lumaNW = Luminance(FastTonemap(rgbNW.xyz * oneOverPaperWhite));
+        float lumaNE = Luminance(FastTonemap(rgbNE.xyz * oneOverPaperWhite));
+        float lumaSW = Luminance(FastTonemap(rgbSW.xyz * oneOverPaperWhite));
+        float lumaSE = Luminance(FastTonemap(rgbSE.xyz * oneOverPaperWhite));
+        float lumaM = Luminance(FastTonemap(color.xyz * oneOverPaperWhite));
+    #else
+        rgbNW = saturate(rgbNW);
+        rgbNE = saturate(rgbNE);
+        rgbSW = saturate(rgbSW);
+        rgbSE = saturate(rgbSE);
+        color = saturate(color);
+
+        half lumaNW = Luminance(rgbNW);
+        half lumaNE = Luminance(rgbNE);
+        half lumaSW = Luminance(rgbSW);
+        half lumaSE = Luminance(rgbSE);
+        half lumaM = Luminance(color);
+    #endif
+
+    float2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y = ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    half lumaSum = lumaNW + lumaNE + lumaSW + lumaSE;
+    float dirReduce = max(lumaSum * (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);
+    float rcpDirMin = rcp(min(abs(dir.x), abs(dir.y)) + dirReduce);
+
+    dir = min((FXAA_SPAN_MAX).xx, max((-FXAA_SPAN_MAX).xx, dir * rcpDirMin)) * sourceSize.zw;
+
+    // Blur
+    half3 rgb03 = FXAAFetch(positionNDC, dir * (0.0 / 3.0 - 0.5), inputTexture);
+    half3 rgb13 = FXAAFetch(positionNDC, dir * (1.0 / 3.0 - 0.5), inputTexture);
+    half3 rgb23 = FXAAFetch(positionNDC, dir * (2.0 / 3.0 - 0.5), inputTexture);
+    half3 rgb33 = FXAAFetch(positionNDC, dir * (3.0 / 3.0 - 0.5), inputTexture);
+
+    #ifdef HDR_INPUT
+        rgb03 = FastTonemap(rgb03 * oneOverPaperWhite);
+        rgb13 = FastTonemap(rgb13 * oneOverPaperWhite);
+        rgb23 = FastTonemap(rgb23 * oneOverPaperWhite);
+        rgb33 = FastTonemap(rgb33 * oneOverPaperWhite);
+    #else
+        rgb03 = saturate(rgb03);
+        rgb13 = saturate(rgb13);
+        rgb23 = saturate(rgb23);
+        rgb33 = saturate(rgb33);
+    #endif
+
+    half3 rgbA = 0.5 * (rgb13 + rgb23);
+    half3 rgbB = rgbA * 0.5 + 0.25 * (rgb03 + rgb33);
+
+    half lumaB = Luminance(rgbB);
+
+    half lumaMin = Min3(lumaM, lumaNW, Min3(lumaNE, lumaSW, lumaSE));
+    half lumaMax = Max3(lumaM, lumaNW, Max3(lumaNE, lumaSW, lumaSE));
+
+    half3 rgb = ((lumaB < lumaMin) || (lumaB > lumaMax)) ? rgbA : rgbB;
+
+    #ifdef HDR_INPUT
+        rgb.xyz = FastTonemapInvert(rgb) * paperWhite;;
+    #endif
+    return rgb;
 }
 
 #endif // UNIVERSAL_POSTPROCESSING_COMMON_INCLUDED

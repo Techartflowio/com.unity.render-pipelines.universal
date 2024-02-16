@@ -42,7 +42,7 @@ namespace UnityEditor.Rendering.Universal
                 for (var i = 0; i < shapeEditor.pointCount; ++i)
                     pointsProperty.GetArrayElementAtIndex(i).vector3Value = shapeEditor.GetPoint(i).position;
 
-                ((Light2D)(serializedObject.targetObject)).UpdateMesh(true);
+                ((Light2D)(serializedObject.targetObject)).UpdateMesh();
 
                 // This is untracked right now...
                 serializedObject.ApplyModifiedProperties();
@@ -113,12 +113,12 @@ namespace UnityEditor.Rendering.Universal
             public static string deprecatedParametricLightDialogCancel = "Cancel";
         }
 
-        const float     k_GlobalLightGizmoSize      = 1.2f;
-        const float     k_AngleCapSize              = 0.16f * k_GlobalLightGizmoSize;
-        const float     k_AngleCapOffset            = 0.08f * k_GlobalLightGizmoSize;
-        const float     k_AngleCapOffsetSecondary   = -0.05f;
-        const float     k_RangeCapSize              = 0.025f * k_GlobalLightGizmoSize;
-        const float     k_InnerRangeCapSize         = 0.08f * k_GlobalLightGizmoSize;
+        const float k_GlobalLightGizmoSize = 1.2f;
+        const float k_AngleCapSize = 0.16f * k_GlobalLightGizmoSize;
+        const float k_AngleCapOffset = 0.08f * k_GlobalLightGizmoSize;
+        const float k_AngleCapOffsetSecondary = -0.05f;
+        const float k_RangeCapSize = 0.025f * k_GlobalLightGizmoSize;
+        const float k_InnerRangeCapSize = 0.08f * k_GlobalLightGizmoSize;
 
         SerializedProperty m_LightType;
         SerializedProperty m_LightColor;
@@ -151,15 +151,15 @@ namespace UnityEditor.Rendering.Universal
         SerializedProperty m_ShapeLightParametricSides;
         SerializedProperty m_ShapeLightSprite;
 
-        SavedBool          m_BlendingSettingsFoldout;
-        SavedBool          m_ShadowsSettingsFoldout;
-        SavedBool          m_VolumetricSettingsFoldout;
-        SavedBool          m_NormalMapsSettingsFoldout;
+        SavedBool m_BlendingSettingsFoldout;
+        SavedBool m_ShadowsSettingsFoldout;
+        SavedBool m_VolumetricSettingsFoldout;
+        SavedBool m_NormalMapsSettingsFoldout;
 
 
-        int[]           m_BlendStyleIndices;
-        GUIContent[]    m_BlendStyleNames;
-        bool            m_AnyBlendStyleEnabled  = false;
+        int[] m_BlendStyleIndices;
+        GUIContent[] m_BlendStyleNames;
+        bool m_AnyBlendStyleEnabled = false;
 
         SortingLayerDropDown m_SortingLayerDropDown;
 
@@ -815,7 +815,7 @@ namespace UnityEditor.Rendering.Universal
                     if (serializedObject.ApplyModifiedProperties())
                     {
                         if (meshChanged)
-                            lightObject.UpdateMesh(true);
+                            lightObject.UpdateMesh();
                     }
                 }
             }
@@ -824,8 +824,19 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUILayout.HelpBox(Styles.renderPipelineUnassignedWarning);
 
                 if (meshChanged)
-                    lightObject.UpdateMesh(true);
+                    lightObject.UpdateMesh();
             }
+        }
+    }
+
+    internal class Light2DPostProcess : AssetPostprocessor
+    {
+        void OnPostprocessSprites(Texture2D texture, Sprite[] sprites)
+        {
+            var lights = Resources.FindObjectsOfTypeAll<Light2D>().Where(x => x.lightType == Light2D.LightType.Sprite && x.lightCookieSprite == null);
+
+            foreach (var light in lights)
+                light.MarkForUpdate();
         }
     }
 }

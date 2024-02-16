@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using UnityEditor.Rendering.Universal.Converters;
+using UnityEditor.Rendering.Universal;
 using ClipPath = UnityEditor.Rendering.AnimationClipUpgrader.ClipPath;
 using ClipProxy = UnityEditor.Rendering.AnimationClipUpgrader.AnimationClipProxy;
 using UnityObject = UnityEngine.Object;
@@ -12,7 +12,7 @@ namespace UnityEditor.Rendering.Universal
     internal sealed class AnimationClipConverter : RenderPipelineConverter
     {
         public override string name => "Animation Clip Converter";
-        public override string info => "Need to update all Animation Clips. This will run after Materials has been converted.";
+        public override string info => "This converter updates all animation clips so that they reference the correct Materials.";
         public override string category { get; }
         public override Type container => typeof(BuiltInToURPConverterContainer);
 
@@ -122,7 +122,7 @@ namespace UnityEditor.Rendering.Universal
             if ((usage & kSuccessFlags) != 0 && (usage & kFilterFlags) == 0)
                 return;
 
-            if (usage ==  SerializedShaderPropertyUsage.Unknown)
+            if (usage == SerializedShaderPropertyUsage.Unknown)
             {
                 ctx.didFail = true;
                 ctx.info = L10n.Tr("The animation clip is not used by any objects with renderers currently in the project, so it may not be safe to automatically upgrade.");

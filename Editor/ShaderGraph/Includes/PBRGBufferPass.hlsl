@@ -23,7 +23,7 @@ void InitializeInputData(Varyings input, SurfaceDescription surfaceDescription, 
         inputData.normalWS = input.normalWS;
     #endif
     inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
-    inputData.viewDirectionWS = SafeNormalize(input.viewDirectionWS);
+    inputData.viewDirectionWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
 
 #if defined(MAIN_LIGHT_CALCULATE_SHADOWS)
     inputData.shadowCoord = TransformWorldToShadowCoord(inputData.positionWS);
@@ -67,17 +67,19 @@ FragmentOutput frag(PackedVaryings packedInput)
     Varyings unpacked = UnpackVaryings(packedInput);
     UNITY_SETUP_INSTANCE_ID(unpacked);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(unpacked);
+    SurfaceDescription surfaceDescription = BuildSurfaceDescription(unpacked);
 
-    SurfaceDescriptionInputs surfaceDescriptionInputs = BuildSurfaceDescriptionInputs(unpacked);
-    SurfaceDescription surfaceDescription = SurfaceDescriptionFunction(surfaceDescriptionInputs);
-
-    #if _ALPHATEST_ON
+    #if defined(_ALPHATEST_ON)
         half alpha = surfaceDescription.Alpha;
         clip(alpha - surfaceDescription.AlphaClipThreshold);
     #elif _SURFACE_TYPE_TRANSPARENT
         half alpha = surfaceDescription.Alpha;
     #else
         half alpha = 1;
+    #endif
+
+    #if defined(LOD_FADE_CROSSFADE) && USE_UNITY_CROSSFADE
+        LODFadeCrossFade(unpacked.positionCS);
     #endif
 
     InputData inputData;

@@ -1,8 +1,12 @@
 # Decal Renderer Feature
 
-With the Decal Renderer Feature, Unity can project specific Materials (decals) onto other objects in the Scene. The decals interact with the Scene’s lighting and wrap around Meshes.
+With the Decal Renderer Feature, Unity can project specific Materials (decals) onto other objects in the Scene. The decals interact with the Scene's lighting and wrap around Meshes.
 
-![Decal Projector in a sample Scene](Images/decal/decal-projector-scene-view.png)<br/>*Decal Projector in a sample Scene.*
+![Sample scene without decals](Images/decal/decal-sample-without.png)<br/>*Sample scene without decals*
+
+![Sample scene with decals](Images/decal/decal-sample-with.png)<br/>*Sample scene with decals. The decals hide the seams between materials and add artistic details.*
+
+For examples of how to use Decals, see the [Decals samples in URP Package Samples](package-sample-urp-package-samples.md#decals).
 
 ## How to use the feature
 
@@ -50,7 +54,7 @@ This section describes the options in this property.
 
 #### Automatic
 
-Unity selects the rendering technique automatically based on the build platform.
+Unity selects the rendering technique automatically based on the build platform. The [Accurate G-buffer normals](rendering/deferred-rendering-path.md#accurate-g-buffer-normals) option is also taken into account, as it prevents normal blending from working correctly without the D-Buffer technique.
 
 #### DBuffer
 
@@ -68,9 +72,11 @@ Selecting this technique reveals the **Surface Data** property. The Surface Data
 
 * This technique does not work on particles and terrain details.
 
-#### Screen Space
+#### <a name="screen-space-technique"></a>Screen Space
 
-Unity renders decals after the opaque objects using normals that Unity reconstructs from the depth texture. Unity renders decals as meshes on top of the opaque meshes. This technique supports only the normal blending.
+Unity renders decals after the opaque objects using normals that Unity reconstructs from the depth texture, or from the G-Buffer when using the Deferred rendering path. Unity renders decals as meshes on top of the opaque meshes. This technique supports only the normal blending. When using the Deferred rendering path with [Accurate G-buffer normals](rendering/deferred-rendering-path.md#accurate-g-buffer-normals), blending of normals is not supported, and will yield incorrect results.
+
+Screen space decals are recommended for mobile platforms that use tile-based rendering, because URP doesn't create a DepthNormal prepass unless you enable **Use Rendering Layers**. 
 
 Selecting this technique reveals the following properties.
 
@@ -80,11 +86,16 @@ Selecting this technique reveals the following properties.
 | &#160;&#160;&#160;&#160;**Low**    | Unity takes one depth sample when reconstructing normals. |
 | &#160;&#160;&#160;&#160;**Medium** | Unity takes three depth samples when reconstructing normals. |
 | &#160;&#160;&#160;&#160;**High**   | Unity takes five depth samples when reconstructing normals. |
-| __Use GBuffer__ | Unity uses this option in the Deferred Rendering Path. In the Deferred Rendering Path, decals affect the base color, the emission color, and the normals. |
 
 ### Max Draw Distance
 
 The maximum distance from the Camera at which Unity renders decals.
+
+### Use Rendering Layers
+
+Select this check box to enable the [Rendering Layers](features/rendering-layers.md) functionality.
+
+If you enable **Use Rendering Layers**, URP creates a DepthNormal prepass. This makes decals less efficient on GPUs that implement tile-based rendering.
 
 ## Decal Projector component
 
@@ -137,6 +148,12 @@ This section describes the Decal Projector component properties.
 | __Start Fade__          | Use the slider to set the distance from the Camera at which the projector begins to fade out the decal. Values from 0 to 1 represent a fraction of the __Draw Distance__. With a value of 0.9, Unity starts fading the decal out at 90% of the __Draw Distance__ and finishes fading it out at the __Draw Distance__. |
 | __Angle Fade__          | Use the slider to set the fade out range of the decal based on the angle between the decal's backward direction and the vertex normal of the receiving surface. |
 
-### Performance
+## Performance
 
-URP supports the GPU instancing of Materials. If the decals in your Scene use the same Material, and if the Material has the **Enable GPU Instancing** property turned on, URP instances the Materials and reduces the performance impact.
+Decals do not support the **SRP Batcher** by design because they use Material property blocks. To reduce the number of draw calls, decals can be batched together using GPU instancing. If the decals in your Scene use the same Material, and if the Material has the **Enable GPU Instancing** property turned on, Unity instances the Materials and reduces the number of draw calls.
+
+To reduce the number of Materials necessary for decals, put multiple decal textures into one texture (atlas). Use the UV offset properties on the decal projector to determine which part of the atlas to display.
+
+The following image shows an example of a decal atlas.
+
+![Decal Atlas](Images/decal/decal-atlas.png) </br> *left: decal atlas with four decals. Right: a decal projector is projecting one of them. If the decal Material has GPU instancing enabled, any instance of the four decals is rendered in a single instanced draw call.*

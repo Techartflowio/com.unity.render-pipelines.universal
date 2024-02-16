@@ -54,11 +54,9 @@ In Universal RP, each individual Light component controls its own shadow biasing
 
 Find these settings under the **Shadows** section. If properties are not visible, change the Bias setting from "Use Pipeline Settings" to "Custom" to expose them.
 
-Using high shadow bias values may result in light "leaking" through Meshes. This is where there is a visible gap between the shadow and its caster, and leads to shadow shapes that do not accurately represent their casters.
+Using high shadow bias values can result in light "leaking" through Meshes. This occurs where there is a visible gap between the shadow and its caster, and leads to shadow shapes that do not accurately represent their casters.
 
+## Configure shadows for better performance
 
-## Performance
-
-Here are some example of frame times (observed with SRP package revision 78d514f756c and Unity 2020.2.0b):
-- Impact of adding a Point Light with hard shadows at position (2, 1, 1) to [Universal RP Project Template](https://docs.unity3d.com/Manual/ProjectTemplates.html) scene on Galaxy S20+:                        +1.9ms (total frame time 22.2ms)
-- Impact of adding a Point Light with hard shadows at position (2, 1, 1) to [Universal RP Project Template](https://docs.unity3d.com/Manual/ProjectTemplates.html) scene on PC - GeForce RTX 2080 Ti (Full HD): +0.1ms (total frame time 16.6ms)
+Refer to [Configure for better performance](configure-for-better-performance.md) for more information about how to adjust shadow settings for better performance.
+ 

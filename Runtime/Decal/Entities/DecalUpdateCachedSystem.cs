@@ -28,6 +28,7 @@ namespace UnityEngine.Rendering.Universal
         public NativeArray<float> fadeFactors;
         public NativeArray<BoundingSphere> boundingSpheres;
         public NativeArray<DecalScaleMode> scaleModes;
+        public NativeArray<uint> renderingLayerMasks;
         public NativeArray<float3> positions;
         public NativeArray<quaternion> rotation;
         public NativeArray<float3> scales;
@@ -49,6 +50,7 @@ namespace UnityEngine.Rendering.Universal
             RemoveAtSwapBack(ref boundingSphereArray, entityIndex, count);
             RemoveAtSwapBack(ref boundingSpheres, entityIndex, count);
             RemoveAtSwapBack(ref scaleModes, entityIndex, count);
+            RemoveAtSwapBack(ref renderingLayerMasks, entityIndex, count);
             RemoveAtSwapBack(ref positions, entityIndex, count);
             RemoveAtSwapBack(ref rotation, entityIndex, count);
             RemoveAtSwapBack(ref scales, entityIndex, count);
@@ -58,23 +60,24 @@ namespace UnityEngine.Rendering.Universal
 
         public override void SetCapacity(int newCapacity)
         {
-            ResizeNativeArray(ref decalToWorlds, newCapacity);
-            ResizeNativeArray(ref normalToWorlds, newCapacity);
-            ResizeNativeArray(ref sizeOffsets, newCapacity);
-            ResizeNativeArray(ref drawDistances, newCapacity);
-            ResizeNativeArray(ref angleFades, newCapacity);
-            ResizeNativeArray(ref uvScaleBias, newCapacity);
-            ResizeNativeArray(ref layerMasks, newCapacity);
-            ResizeNativeArray(ref sceneLayerMasks, newCapacity);
-            ResizeNativeArray(ref fadeFactors, newCapacity);
-            ResizeNativeArray(ref boundingSpheres, newCapacity);
-            ResizeNativeArray(ref scaleModes, newCapacity);
-            ResizeNativeArray(ref positions, newCapacity);
-            ResizeNativeArray(ref rotation, newCapacity);
-            ResizeNativeArray(ref scales, newCapacity);
-            ResizeNativeArray(ref dirty, newCapacity);
+            decalToWorlds.ResizeArray(newCapacity);
+            normalToWorlds.ResizeArray(newCapacity);
+            sizeOffsets.ResizeArray(newCapacity);
+            drawDistances.ResizeArray(newCapacity);
+            angleFades.ResizeArray(newCapacity);
+            uvScaleBias.ResizeArray(newCapacity);
+            layerMasks.ResizeArray(newCapacity);
+            sceneLayerMasks.ResizeArray(newCapacity);
+            fadeFactors.ResizeArray(newCapacity);
+            boundingSpheres.ResizeArray(newCapacity);
+            scaleModes.ResizeArray(newCapacity);
+            renderingLayerMasks.ResizeArray(newCapacity);
+            positions.ResizeArray(newCapacity);
+            rotation.ResizeArray(newCapacity);
+            scales.ResizeArray(newCapacity);
+            dirty.ResizeArray(newCapacity);
 
-            ResizeArray(ref boundingSphereArray, newCapacity);
+            ArrayExtensions.ResizeArray(ref boundingSphereArray, newCapacity);
             capacity = newCapacity;
         }
 
@@ -94,6 +97,7 @@ namespace UnityEngine.Rendering.Universal
             fadeFactors.Dispose();
             boundingSpheres.Dispose();
             scaleModes.Dispose();
+            renderingLayerMasks.Dispose();
             positions.Dispose();
             rotation.Dispose();
             scales.Dispose();
@@ -174,7 +178,7 @@ namespace UnityEngine.Rendering.Universal
                     decalToWorlds = cachedChunk.decalToWorlds,
                     normalToWorlds = cachedChunk.normalToWorlds,
                     boundingSpheres = cachedChunk.boundingSpheres,
-                    minDistance = 0.0001f,
+                    minDistance = System.Single.Epsilon,
                 };
 
                 var handle = updateTransformJob.Schedule(entityChunk.transformAccessArray);

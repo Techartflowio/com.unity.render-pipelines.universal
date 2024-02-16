@@ -18,6 +18,7 @@ namespace UnityEngine.Rendering.Universal
     {
         public NativeArray<float4x4> decalToWorlds;
         public NativeArray<float4x4> normalToDecals;
+        public NativeArray<float> renderingLayerMasks;
         public NativeArray<DecalSubDrawCall> subCalls;
         public NativeArray<int> subCallCounts;
 
@@ -27,15 +28,17 @@ namespace UnityEngine.Rendering.Universal
         {
             RemoveAtSwapBack(ref decalToWorlds, entityIndex, count);
             RemoveAtSwapBack(ref normalToDecals, entityIndex, count);
+            RemoveAtSwapBack(ref renderingLayerMasks, entityIndex, count);
             RemoveAtSwapBack(ref subCalls, entityIndex, count);
             count--;
         }
 
         public override void SetCapacity(int newCapacity)
         {
-            ResizeNativeArray(ref decalToWorlds, newCapacity);
-            ResizeNativeArray(ref normalToDecals, newCapacity);
-            ResizeNativeArray(ref subCalls, newCapacity);
+            decalToWorlds.ResizeArray(newCapacity);
+            normalToDecals.ResizeArray(newCapacity);
+            renderingLayerMasks.ResizeArray(newCapacity);
+            subCalls.ResizeArray(newCapacity);
             capacity = newCapacity;
         }
 
@@ -48,6 +51,7 @@ namespace UnityEngine.Rendering.Universal
 
             decalToWorlds.Dispose();
             normalToDecals.Dispose();
+            renderingLayerMasks.Dispose();
             subCalls.Dispose();
             count = 0;
             capacity = 0;
@@ -62,6 +66,15 @@ namespace UnityEngine.Rendering.Universal
         private DecalEntityManager m_EntityManager;
         private ProfilingSampler m_Sampler;
         private float m_MaxDrawDistance;
+
+        /// <summary>
+        /// Provides acces to the maximum draw distance.
+        /// </summary>
+        public float maxDrawDistance
+        {
+            get { return m_MaxDrawDistance; }
+            set { m_MaxDrawDistance = value; }
+        }
 
         public DecalCreateDrawCallSystem(DecalEntityManager entityManager, float maxDrawDistance)
         {
@@ -96,6 +109,7 @@ namespace UnityEngine.Rendering.Universal
                 sceneLayerMasks = cachedChunk.sceneLayerMasks,
                 fadeFactors = cachedChunk.fadeFactors,
                 boundingSpheres = cachedChunk.boundingSpheres,
+                renderingLayerMasks = cachedChunk.renderingLayerMasks,
 
                 cameraPosition = culledChunk.cameraPosition,
                 sceneCullingMask = culledChunk.sceneCullingMask,
@@ -106,6 +120,7 @@ namespace UnityEngine.Rendering.Universal
 
                 decalToWorldsDraw = drawCallChunk.decalToWorlds,
                 normalToDecalsDraw = drawCallChunk.normalToDecals,
+                renderingLayerMasksDraw = drawCallChunk.renderingLayerMasks,
                 subCalls = drawCallChunk.subCalls,
                 subCallCount = drawCallChunk.subCallCounts,
             };
@@ -130,6 +145,7 @@ namespace UnityEngine.Rendering.Universal
             [ReadOnly] public NativeArray<ulong> sceneLayerMasks;
             [ReadOnly] public NativeArray<float> fadeFactors;
             [ReadOnly] public NativeArray<BoundingSphere> boundingSpheres;
+            [ReadOnly] public NativeArray<uint> renderingLayerMasks;
 
             public Vector3 cameraPosition;
             public ulong sceneCullingMask;
@@ -140,6 +156,7 @@ namespace UnityEngine.Rendering.Universal
 
             [WriteOnly] public NativeArray<float4x4> decalToWorldsDraw;
             [WriteOnly] public NativeArray<float4x4> normalToDecalsDraw;
+            [WriteOnly] public NativeArray<float> renderingLayerMasksDraw;
             [WriteOnly] public NativeArray<DecalSubDrawCall> subCalls;
             [WriteOnly] public NativeArray<int> subCallCount;
 
@@ -185,12 +202,13 @@ namespace UnityEngine.Rendering.Universal
                     normalToDecals.c3 = new float4(fadeFactor * 1.0f, angleFade.x, angleFade.y, uvScaleBias.w);
                     normalToDecalsDraw[instanceIndex] = normalToDecals;
 
+                    renderingLayerMasksDraw[instanceIndex] = (float)renderingLayerMasks[decalIndex];
+
                     instanceIndex++;
 
                     int instanceCount = instanceIndex - instanceStart;
                     bool isReachedMaximumBatchSize = instanceCount >= 250;
-                    bool isLastDecal = i == visibleDecalCount - 1;
-                    if (isReachedMaximumBatchSize || isLastDecal)
+                    if (isReachedMaximumBatchSize)
                     {
                         subCalls[subCallIndex++] = new DecalSubDrawCall()
                         {
@@ -199,6 +217,16 @@ namespace UnityEngine.Rendering.Universal
                         };
                         instanceStart = instanceIndex;
                     }
+                }
+
+                int remainingInstanceCount = instanceIndex - instanceStart;
+                if (remainingInstanceCount != 0)
+                {
+                    subCalls[subCallIndex++] = new DecalSubDrawCall()
+                    {
+                        start = instanceStart,
+                        end = instanceIndex,
+                    };
                 }
 
                 subCallCount[0] = subCallIndex;

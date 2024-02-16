@@ -4,6 +4,8 @@ This page describes URP-specific behavior of reflection probes.
 
 For general information on reflection probes, see the page [Reflection Probes](https://docs.unity3d.com/Manual/ReflectionProbes.html).
 
+For examples of how to use reflection probes, see the [Lighting samples in URP Package Samples](../package-sample-urp-package-samples.md#lighting).
+
 ## Configuring reflection probe settings
 
 To configure settings related to reflection probes, in a URP Asset, select **Lighting** > **Reflection Probes**.
@@ -14,14 +16,14 @@ The Reflection Probes section contains the following properties:
 
 | __Property__ | __Description__ |
 | --- | --- |
-| **Probe Blending** | Select this property to enable [reflection probe blending](#reflection-probe-blending). |
-| **Box Projection** | Select this property to enable reflection probe box projection. |
+| **Probe Blending** | Select this property to enable [reflection probe blending](#reflection-probe-blending). On lower-end mobile platforms, disable this property to decrease processing time on the CPU. |
+| **Box Projection** | Select this property to enable reflection probe box projection. On lower-end mobile platforms, disable this property to decrease processing time on the CPU. |
 
 ## Reflection probe blending
 
 Reflection probe blending lets you avoid a situation where a reflection suddenly appears on an object when it enters the probe box volume. When reflection probe blending is enabled, Unity gradually fades probe cubemaps in and out as the reflective object passes from one volume to the other.
 
-URP supports reflection probe blending for the Forward and the Deferred Rendering Paths.
+URP supports reflection probe blending in all Rendering Paths.
 ### Reflection probe volume
 
 Each reflection probe has a box volume. A reflection probe only affects parts of a GameObject that are inside the box volume. When a pixel of an object is outside of any reflection probe volume, Unity uses the skybox reflection.
@@ -46,7 +48,9 @@ When a GameObject is within multiple reflection probe volumes, maximum two of th
 
 * If the Importance values and the box volumes are the same, Unity determines which two reflection probe volumes contain larger surface areas of a GameObject, and picks the probes of those volumes.
 
-When two reflection probes affect a GameObject, for each pixel, Unity calculates the weight of each probe depending on the distance of this pixel from the faces of the probe box volumes and the values of the **Blend Distance** properties. If the pixel is relatively close to faces of both box volumes and the sum of weights of both probes is less than 1, Unity assigns the remaining weight to the skybox reflection.
+When two reflection probes affect a GameObject, for each pixel, Unity calculates the weight of each probe depending on the distance of this pixel from the faces of the probe box volumes and the values of the **Blend Distance** properties.
+
+If the pixel is relatively close to faces of both box volumes and the sum of weights of both probes is less than 1, Unity assigns the remaining weight to the `_GlossyEnvironmentCubeMap`. This cube map contains the reflection from the lighting source set in the Lighting window under **Environment Lighting** > **Source**. In most cases this source is the skybox.
 
 If the pixel is within both box volumes and farther than the Blend Distance values from faces of both volumes:
 

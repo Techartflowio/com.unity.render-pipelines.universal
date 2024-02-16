@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -38,7 +39,7 @@ namespace UnityEngine.Rendering.Universal
 
         public static bool GetGlobalColor(int sortingLayerIndex, int blendStyleIndex, out Color color)
         {
-            var  foundGlobalColor = false;
+            var foundGlobalColor = false;
             color = Color.black;
 
             // This should be rewritten to search only global lights
@@ -103,14 +104,8 @@ namespace UnityEngine.Rendering.Universal
         public static SortingLayer[] GetCachedSortingLayer()
         {
             if (s_SortingLayers is null)
-            {
                 s_SortingLayers = SortingLayer.layers;
-            }
-#if UNITY_EDITOR
-            // we should fix. Make a non allocating version of this
-            if (!Application.isPlaying)
-                s_SortingLayers = SortingLayer.layers;
-#endif
+
             return s_SortingLayers;
         }
     }

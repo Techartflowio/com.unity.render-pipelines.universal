@@ -36,6 +36,10 @@
 #define DECAL_LOAD_NORMAL
 #endif
 
+#ifdef _DECAL_LAYERS
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareRenderingLayerTexture.hlsl"
+#endif
+
 #if defined(DECAL_LOAD_NORMAL)
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
 #endif
@@ -50,6 +54,8 @@
 #ifdef DECAL_RECONSTRUCT_NORMAL
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/NormalReconstruction.hlsl"
 #endif
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRendering.hlsl"
 
 void MeshDecalsPositionZBias(inout Varyings input)
 {
@@ -77,8 +83,8 @@ void InitializeInputData(Varyings input, float3 positionWS, half3 normalWS, half
 #endif
 
 #ifdef VARYINGS_NEED_FOG_AND_VERTEX_LIGHT
-    inputData.fogCoord = half(input.fogFactorAndVertexLight.x);
-    inputData.vertexLighting = half3(input.fogFactorAndVertexLight.yzw);
+    inputData.fogCoord = InitializeInputDataFog(float4(positionWS, 1.0), input.fogFactorAndVertexLight.x);
+    inputData.vertexLighting = input.fogFactorAndVertexLight.yzw;
 #endif
 
 #if defined(VARYINGS_NEED_DYNAMIC_LIGHTMAP_UV) && defined(DYNAMICLIGHTMAP_ON)
@@ -95,7 +101,7 @@ void InitializeInputData(Varyings input, float3 positionWS, half3 normalWS, half
     #if defined(VARYINGS_NEED_DYNAMIC_LIGHTMAP_UV) && defined(DYNAMICLIGHTMAP_ON)
     inputData.dynamicLightmapUV = input.dynamicLightmapUV.xy;
     #endif
-    #if defined(VARYINGS_NEED_STATIC_LIGHTMAP_UV && LIGHTMAP_ON)
+    #if defined(VARYINGS_NEED_STATIC_LIGHTMAP_UV) && defined(LIGHTMAP_ON)
     inputData.staticLightmapUV = input.staticLightmapUV;
     #elif defined(VARYINGS_NEED_SH)
     inputData.vertexSH = input.sh;
@@ -121,6 +127,8 @@ void GetSurface(DecalSurfaceData decalSurfaceData, inout SurfaceData surfaceData
 PackedVaryings Vert(Attributes inputMesh)
 {
     Varyings output = (Varyings)0;
+    UNITY_SETUP_INSTANCE_ID(inputMesh);
+    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 #ifdef DECAL_MESH
     if (_DecalMeshBiasType == DECALMESHDEPTHBIASTYPE_VIEW_BIAS) // TODO: Check performance of branch
     {
@@ -179,28 +187,63 @@ void Frag(PackedVaryings packedInput,
 
     half angleFadeFactor = 1.0;
 
+    float2 positionCS = input.positionCS.xy;
+
+    // Only screen space needs flip logic, other passes do not setup needed properties so we skip here
+#if defined(DECAL_SCREEN_SPACE)
+    TransformScreenUV(positionCS, _ScreenSize.y);
+#endif
+
+#ifdef _DECAL_LAYERS
+#ifdef _RENDER_PASS_ENABLED
+    uint surfaceRenderingLayer = DecodeMeshRenderingLayer(LOAD_FRAMEBUFFER_INPUT(GBUFFER4, positionCS.xy).r);
+#else
+    uint surfaceRenderingLayer = LoadSceneRenderingLayer(positionCS.xy);
+#endif
+    uint projectorRenderingLayer = uint(UNITY_ACCESS_INSTANCED_PROP(Decal, _DecalLayerMaskFromDecal));
+    // This is simple trick to clip if there is no matching layers
+    // Part (surfaceRenderingLayer & projectorRenderingLayer) will produce 0, 1, 2 ...
+    // Finally we subtract with small value to remmap only zero to negative value
+    clip((surfaceRenderingLayer & projectorRenderingLayer) - 0.1);
+#endif
+
 #if defined(DECAL_PROJECTOR)
 #if UNITY_REVERSED_Z
-    float depth = LoadSceneDepth(input.positionCS.xy);
+#if _RENDER_PASS_ENABLED
+    float depth = LOAD_FRAMEBUFFER_INPUT(GBUFFER3, positionCS.xy).x;
+#else
+    float depth = LoadSceneDepth(positionCS.xy);
+#endif
+#else
+#if _RENDER_PASS_ENABLED
+    float depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, LOAD_FRAMEBUFFER_INPUT(GBUFFER3, positionCS.xy));
 #else
     // Adjust z to match NDC for OpenGL
-    float depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, LoadSceneDepth(input.positionCS.xy));
+    float depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, LoadSceneDepth(positionCS.xy));
+#endif
 #endif
 #endif
 
 #if defined(DECAL_RECONSTRUCT_NORMAL)
     #if defined(_DECAL_NORMAL_BLEND_HIGH)
-        half3 normalWS = half3(ReconstructNormalTap9(input.positionCS.xy));
+        half3 normalWS = half3(ReconstructNormalTap9(positionCS.xy));
     #elif defined(_DECAL_NORMAL_BLEND_MEDIUM)
-        half3 normalWS = half3(ReconstructNormalTap5(input.positionCS.xy));
+        half3 normalWS = half3(ReconstructNormalTap5(positionCS.xy));
     #else
         half3 normalWS = half3(ReconstructNormalDerivative(input.positionCS.xy));
     #endif
 #elif defined(DECAL_LOAD_NORMAL)
-    half3 normalWS = half3(LoadSceneNormals(input.positionCS.xy));
+    half3 normalWS = half3(LoadSceneNormals(positionCS.xy));
 #endif
 
     float2 positionSS = input.positionCS.xy * _ScreenSize.zw;
+
+#if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+    UNITY_BRANCH if (_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+    {
+        positionSS = RemapFoveatedRenderingNonUniformToLinearCS(input.positionCS.xy, true) * _ScreenSize.zw;
+    }
+#endif
 
 #ifdef DECAL_PROJECTOR
     float3 positionWS = ComputeWorldSpacePosition(positionSS, depth, UNITY_MATRIX_I_VP);
@@ -250,15 +293,10 @@ void Frag(PackedVaryings packedInput,
     float3 positionWS = input.positionWS.xyz;
 #endif
 
-#ifdef VARYINGS_NEED_VIEWDIRECTION_WS
-    half3 viewDirectionWS = half3(input.viewDirectionWS);
-#else
-    // Unused
-    half3 viewDirectionWS = half3(1.0, 1.0, 1.0); // Avoid the division by 0
-#endif
+    half3 viewDirectionWS = GetWorldSpaceNormalizeViewDir(positionWS);
 
     DecalSurfaceData surfaceData;
-    GetSurfaceData(input, viewDirectionWS, (uint2)positionSS, angleFadeFactor, surfaceData);
+    GetSurfaceData(input, input.positionCS, angleFadeFactor, surfaceData);
 
 #if defined(DECAL_DBUFFER)
     ENCODE_INTO_DBUFFER(surfaceData, outDBuffer);
@@ -282,6 +320,12 @@ void Frag(PackedVaryings packedInput,
     outColor = color;
 #elif defined(DECAL_GBUFFER)
 
+    // Need to reconstruct normal here for inputData.bakedGI, but also save off surfaceData.normalWS for correct GBuffer blending
+    half3 normalToPack = surfaceData.normalWS.xyz;
+#ifdef DECAL_RECONSTRUCT_NORMAL
+    surfaceData.normalWS.xyz = normalize(lerp(normalWS.xyz, surfaceData.normalWS.xyz, surfaceData.normalWS.w));
+#endif
+
     InputData inputData;
     InitializeInputData(input, positionWS, surfaceData.normalWS.xyz, viewDirectionWS, inputData);
 
@@ -293,21 +337,16 @@ void Frag(PackedVaryings packedInput,
 
     // Skip GI if there is no abledo
 #ifdef _MATERIAL_AFFECTS_ALBEDO
-
-    // GI needs blended normal
-#ifdef DECAL_RECONSTRUCT_NORMAL
-    half3 normalGI = normalize(lerp(normalWS.xyz, surfaceData.normalWS.xyz, surfaceData.normalWS.w));
-#endif
-
     Light mainLight = GetMainLight(inputData.shadowCoord, inputData.positionWS, inputData.shadowMask);
-    MixRealtimeAndBakedGI(mainLight, normalGI, inputData.bakedGI, inputData.shadowMask);
-    half3 color = GlobalIllumination(brdfData, inputData.bakedGI, surface.occlusion, normalGI, inputData.viewDirectionWS);
+    MixRealtimeAndBakedGI(mainLight, surfaceData.normalWS.xyz, inputData.bakedGI, inputData.shadowMask);
+    half3 color = GlobalIllumination(brdfData, inputData.bakedGI, surface.occlusion, surfaceData.normalWS.xyz, inputData.viewDirectionWS);
 #else
     half3 color = 0;
 #endif
 
     // We can not use usual GBuffer functions (etc. BRDFDataToGbuffer) as we use alpha for blending
-    half3 packedNormalWS = PackNormal(surfaceData.normalWS.xyz);
+    #pragma warning (disable : 3578) // The output value isn't completely initialized.
+    half3 packedNormalWS = PackNormal(normalToPack);
     fragmentOutput.GBuffer0 = half4(surfaceData.baseColor.rgb, surfaceData.baseColor.a);
     fragmentOutput.GBuffer1 = 0;
     fragmentOutput.GBuffer2 = half4(packedNormalWS, surfaceData.normalWS.a);
@@ -315,6 +354,7 @@ void Frag(PackedVaryings packedInput,
 #if OUTPUT_SHADOWMASK
     fragmentOutput.GBuffer4 = inputData.shadowMask; // will have unity_ProbesOcclusion value if subtractive lighting is used (baked)
 #endif
+    #pragma warning (default : 3578) // Restore output value isn't completely initialized.
 
 #elif defined(DECAL_FORWARD_EMISSIVE)
     // Emissive need to be pre-exposed

@@ -5,6 +5,9 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+#if XR_MANAGEMENT_4_0_1_OR_NEWER
+using UnityEditor.XR.Management;
+#endif
 
 namespace UnityEditor.Rendering.Universal
 {
@@ -40,13 +43,13 @@ namespace UnityEditor.Rendering.Universal
                     return !sceneLighting;
                 },
                 (_, __) => EditorGUILayout.HelpBox(Styles.DisabledLightWarning.text, MessageType.Warning)),
-            CED.FoldoutGroup(Styles.generalHeader,
+            CED.FoldoutGroup(LightUI.Styles.generalHeader,
                 Expandable.General,
                 k_ExpandedState,
                 DrawGeneralContent),
             CED.Conditional(
                 (serializedLight, editor) => !serializedLight.settings.lightType.hasMultipleDifferentValues && serializedLight.settings.light.type == LightType.Spot,
-                CED.FoldoutGroup(Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawSpotShapeContent)),
+                CED.FoldoutGroup(LightUI.Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawSpotShapeContent)),
             CED.Conditional(
                 (serializedLight, editor) =>
                 {
@@ -55,23 +58,21 @@ namespace UnityEditor.Rendering.Universal
                     var lightType = serializedLight.settings.light.type;
                     return lightType == LightType.Rectangle || lightType == LightType.Disc;
                 },
-                CED.FoldoutGroup(Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawAreaShapeContent)),
-            CED.FoldoutGroup(Styles.emissionHeader,
+                CED.FoldoutGroup(LightUI.Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawAreaShapeContent)),
+            CED.FoldoutGroup(LightUI.Styles.emissionHeader,
                 Expandable.Emission,
                 k_ExpandedState,
-                CED.Group(DrawerColor, DrawEmissionContent)),
-            CED.FoldoutGroup(Styles.renderingHeader,
+                CED.Group(
+                    LightUI.DrawColor,
+                    DrawEmissionContent)),
+            CED.FoldoutGroup(LightUI.Styles.renderingHeader,
                 Expandable.Rendering,
                 k_ExpandedState,
                 DrawRenderingContent),
-            CED.FoldoutGroup(Styles.shadowHeader,
+            CED.FoldoutGroup(LightUI.Styles.shadowHeader,
                 Expandable.Shadows,
                 k_ExpandedState,
-                DrawShadowsContent),
-            CED.FoldoutGroup(Styles.lightCookieHeader,
-                Expandable.LightCookie,
-                k_ExpandedState,
-                DrawLightCookieContent)
+                DrawShadowsContent)
         );
 
         static Func<int> s_SetGizmosDirty = SetGizmosDirty();
@@ -112,6 +113,16 @@ namespace UnityEditor.Rendering.Universal
         }
 
         static void DrawGeneralContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
+        {
+            DrawGeneralContentInternal(serializedLight, owner, isInPreset: false);
+        }
+
+        static void DrawGeneralContentPreset(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
+        {
+            DrawGeneralContentInternal(serializedLight, owner, isInPreset: true);
+        }
+
+        static void DrawGeneralContentInternal(UniversalRenderPipelineSerializedLight serializedLight, Editor owner, bool isInPreset)
         {
             // To the user, we will only display it as a area light, but under the hood, we have Rectangle and Disc. This is not to confuse people
             // who still use our legacy light inspector.
@@ -157,14 +168,14 @@ namespace UnityEditor.Rendering.Universal
                     serializedLight.Apply();
                 }
 
-                if (lightType != LightType.Rectangle && !serializedLight.settings.isCompletelyBaked && UniversalRenderPipeline.asset.supportsLightLayers)
+                if (lightType != LightType.Rectangle && !serializedLight.settings.isCompletelyBaked && UniversalRenderPipeline.asset.useRenderingLayers && !isInPreset)
                 {
                     EditorGUI.BeginChangeCheck();
-                    DrawLightLayerMask(serializedLight.lightLayerMask, Styles.LightLayer);
+                    EditorUtils.DrawRenderingLayerMask(serializedLight.renderingLayers, Styles.RenderingLayers);
                     if (EditorGUI.EndChangeCheck())
                     {
                         if (!serializedLight.customShadowLayers.boolValue)
-                            SyncLightAndShadowLayers(serializedLight, serializedLight.lightLayerMask);
+                            SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
                     }
                 }
             }
@@ -184,21 +195,6 @@ namespace UnityEditor.Rendering.Universal
                 if (target.renderingLayerMask != serialized.intValue)
                     target.renderingLayerMask = serialized.intValue;
             }
-        }
-
-        internal static void DrawLightLayerMask(SerializedProperty property, GUIContent style)
-        {
-            Rect controlRect = EditorGUILayout.GetControlRect(true);
-            int lightLayer = property.intValue;
-
-            EditorGUI.BeginProperty(controlRect, style, property);
-
-            EditorGUI.BeginChangeCheck();
-            lightLayer = EditorGUI.MaskField(controlRect, style, lightLayer, UniversalRenderPipelineGlobalSettings.instance.prefixedLightLayerNames);
-            if (EditorGUI.EndChangeCheck())
-                property.intValue = lightLayer;
-
-            EditorGUI.EndProperty();
         }
 
         static void DrawSpotShapeContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
@@ -235,34 +231,6 @@ namespace UnityEditor.Rendering.Universal
                 serializedLight.settings.DrawArea();
         }
 
-        static void DrawerColor(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
-        {
-            using (var changes = new EditorGUI.ChangeCheckScope())
-            {
-                if (GraphicsSettings.lightsUseLinearIntensity && GraphicsSettings.lightsUseColorTemperature)
-                {
-                    // Use the color temperature bool to create a popup dropdown to choose between the two modes.
-                    var colorTemperaturePopupValue = Convert.ToInt32(serializedLight.settings.useColorTemperature.boolValue);
-                    var lightAppearanceOptions = new[] { "Color", "Filter and Temperature" };
-                    colorTemperaturePopupValue = EditorGUILayout.Popup(Styles.lightAppearance, colorTemperaturePopupValue, lightAppearanceOptions);
-                    serializedLight.settings.useColorTemperature.boolValue = Convert.ToBoolean(colorTemperaturePopupValue);
-
-                    using (new EditorGUI.IndentLevelScope())
-                    {
-                        if (serializedLight.settings.useColorTemperature.boolValue)
-                        {
-                            EditorGUILayout.PropertyField(serializedLight.settings.color, Styles.colorFilter);
-                            k_SliderWithTexture(Styles.colorTemperature, serializedLight.settings.colorTemperature, serializedLight.settings);
-                        }
-                        else
-                            EditorGUILayout.PropertyField(serializedLight.settings.color, Styles.color);
-                    }
-                }
-                else
-                    EditorGUILayout.PropertyField(serializedLight.settings.color, Styles.color);
-            }
-        }
-
         static void DrawEmissionContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
         {
             serializedLight.settings.DrawIntensity();
@@ -280,14 +248,15 @@ namespace UnityEditor.Rendering.Universal
 #endif
                 }
             }
+
+            DrawLightCookieContent(serializedLight, owner);
         }
 
         static void DrawRenderingContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
         {
             serializedLight.settings.DrawRenderMode();
 
-            using (new EditorGUI.DisabledScope(UniversalRenderPipeline.asset.supportsLightLayers))
-                serializedLight.settings.DrawCullingMask();
+            EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, Styles.CullingMask);
         }
 
         static void DrawShadowsContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
@@ -340,14 +309,38 @@ namespace UnityEditor.Rendering.Universal
                         EditorGUILayout.Slider(serializedLight.settings.shadowsStrength, 0f, 1f, Styles.ShadowStrength);
 
                         // Bias
-                        DrawAdditionalShadowData(serializedLight);
+                        DrawAdditionalShadowData(serializedLight, owner);
 
                         // this min bound should match the calculation in SharedLightData::GetNearPlaneMinBound()
                         float nearPlaneMinBound = Mathf.Min(0.01f * serializedLight.settings.range.floatValue, 0.1f);
                         EditorGUILayout.Slider(serializedLight.settings.shadowsNearPlane, nearPlaneMinBound, 10.0f, Styles.ShadowNearPlane);
+                        var isHololens = false;
+                        var isQuest = false;
+#if XR_MANAGEMENT_4_0_1_OR_NEWER
+                        var buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+                        var buildTargetSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(buildTargetGroup);
+                        if (buildTargetSettings != null && buildTargetSettings.AssignedSettings != null && buildTargetSettings.AssignedSettings.activeLoaders.Count > 0)
+                        {
+                            isHololens = buildTargetGroup == BuildTargetGroup.WSA;
+                            isQuest = buildTargetGroup == BuildTargetGroup.Android;
+                        }
+
+#endif
+                        // Soft Shadow Quality
+                        if (serializedLight.settings.light.shadows == LightShadows.Soft)
+                            EditorGUILayout.PropertyField(serializedLight.softShadowQualityProp, Styles.SoftShadowQuality);
+
+                        if (isHololens || isQuest)
+                        {
+                            EditorGUILayout.HelpBox(
+                                "Per-light soft shadow quality level is not supported on untethered XR platforms. Use the Soft Shadow Quality setting in the URP Asset instead",
+                                MessageType.Warning
+                            );
+                        }
+
                     }
 
-                    if (UniversalRenderPipeline.asset.supportsLightLayers)
+                    if (UniversalRenderPipeline.asset.useRenderingLayers)
                     {
                         EditorGUI.BeginChangeCheck();
                         EditorGUILayout.PropertyField(serializedLight.customShadowLayers, Styles.customShadowLayers);
@@ -356,12 +349,12 @@ namespace UnityEditor.Rendering.Universal
                         {
                             if (serializedLight.customShadowLayers.boolValue)
                             {
-                                serializedLight.settings.light.renderingLayerMask = serializedLight.shadowLayerMask.intValue;
+                                serializedLight.settings.light.renderingLayerMask = serializedLight.shadowRenderingLayers.intValue;
                             }
                             else
                             {
                                 serializedLight.serializedAdditionalDataObject.ApplyModifiedProperties(); // we need to push above modification the modification on object as it is used to sync
-                                SyncLightAndShadowLayers(serializedLight, serializedLight.lightLayerMask);
+                                SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
                             }
                         }
 
@@ -370,10 +363,10 @@ namespace UnityEditor.Rendering.Universal
                             using (new EditorGUI.IndentLevelScope())
                             {
                                 EditorGUI.BeginChangeCheck();
-                                DrawLightLayerMask(serializedLight.shadowLayerMask, Styles.ShadowLayer);
+                                EditorUtils.DrawRenderingLayerMask(serializedLight.shadowRenderingLayers, Styles.ShadowLayer);
                                 if (EditorGUI.EndChangeCheck())
                                 {
-                                    serializedLight.settings.light.renderingLayerMask = serializedLight.shadowLayerMask.intValue;
+                                    serializedLight.settings.light.renderingLayerMask = serializedLight.shadowRenderingLayers.intValue;
                                     serializedLight.Apply();
                                 }
                             }
@@ -386,7 +379,7 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUILayout.HelpBox(Styles.BakingWarning.text, MessageType.Warning);
         }
 
-        static void DrawAdditionalShadowData(UniversalRenderPipelineSerializedLight serializedLight)
+        static void DrawAdditionalShadowData(UniversalRenderPipelineSerializedLight serializedLight, Editor editor)
         {
             // 0: Custom bias - 1: Bias values defined in Pipeline settings
             int selectedUseAdditionalData = serializedLight.additionalLightData.usePipelineSettings ? 1 : 0;
@@ -398,10 +391,12 @@ namespace UnityEditor.Rendering.Universal
                     selectedUseAdditionalData = EditorGUI.IntPopup(r, Styles.shadowBias, selectedUseAdditionalData, Styles.displayedDefaultOptions, Styles.optionDefaultValues);
                     if (checkScope.changed)
                     {
+                        Undo.RecordObjects(serializedLight.lightsAdditionalData, "Modified light additional data");
                         foreach (var additionData in serializedLight.lightsAdditionalData)
                             additionData.usePipelineSettings = selectedUseAdditionalData != 0;
 
                         serializedLight.Apply();
+                        (editor as UniversalRenderPipelineLightEditor)?.ReconstructReferenceToAdditionalDataSO();
                     }
                 }
             }
@@ -455,6 +450,8 @@ namespace UnityEditor.Rendering.Universal
                     }
                 }
             }
+
+            EditorGUILayout.HelpBox(Styles.ShadowInfo.text, MessageType.Info);
         }
 
         static void DrawLightCookieContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)

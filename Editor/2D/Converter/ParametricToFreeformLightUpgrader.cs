@@ -1,10 +1,9 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
-using UnityEditor.Rendering.Universal.Converters;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
-
+using UnityEditor.SceneManagement;
 
 namespace UnityEditor.Rendering.Universal
 {
@@ -14,7 +13,7 @@ namespace UnityEditor.Rendering.Universal
 
         public override string name => "Parametric to Freeform Light Upgrade";
         public override string info => "This will upgrade all parametric lights to freeform lights.";
-        public override int priority => - 1000;
+        public override int priority => -1000;
         public override Type container => typeof(UpgradeURP2DAssetsContainer);
 
         List<string> m_AssetsToConvert = new List<string>();
@@ -26,6 +25,10 @@ namespace UnityEditor.Rendering.Universal
             if (light.lightType == (Light2D.LightType)Light2D.DeprecatedLightType.Parametric)
             {
                 light.lightType = Light2D.LightType.Freeform;
+
+                // Parametric radius has to be > 0 in order mesh tessellation to be valid
+                if (light.shapeLightParametricRadius == 0)
+                    light.shapeLightParametricRadius = 0.01f;
 
                 float radius = light.shapeLightParametricRadius;
                 float angle = light.shapeLightParametricAngleOffset;
@@ -59,7 +62,8 @@ namespace UnityEditor.Rendering.Universal
                 }
 
                 light.shapePath = shapePath;
-                light.UpdateMesh(true);
+                light.UpdateMesh();
+                EditorSceneManager.MarkSceneDirty(light.gameObject.scene);
             }
         }
 

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine.Experimental.Rendering;
+using Unity.Collections;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -84,9 +85,7 @@ namespace UnityEngine.Rendering.Universal
             if (renderScale != pass.rendererData.normalsRenderTargetScale)
             {
                 if (pass.rendererData.isNormalsRenderTargetValid)
-                {
-                    cmd.ReleaseTemporaryRT(pass.rendererData.normalsRenderTarget.id);
-                }
+                    cmd.ReleaseTemporaryRT(pass.rendererData.normalsRenderTargetId);
 
                 pass.rendererData.isNormalsRenderTargetValid = true;
                 pass.rendererData.normalsRenderTargetScale = renderScale;
@@ -98,11 +97,11 @@ namespace UnityEngine.Rendering.Universal
                 descriptor.graphicsFormat = GetRenderTextureFormat();
                 descriptor.useMipMap = false;
                 descriptor.autoGenerateMips = false;
-                descriptor.depthBufferBits = 0;
+                descriptor.depthBufferBits = pass.rendererData.useDepthStencilBuffer ? Renderer2D.k_DepthBufferBits : 0;
                 descriptor.msaaSamples = renderingData.cameraData.cameraTargetDescriptor.msaaSamples;
                 descriptor.dimension = TextureDimension.Tex2D;
 
-                cmd.GetTemporaryRT(pass.rendererData.normalsRenderTarget.id, descriptor, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(pass.rendererData.normalsRenderTargetId, descriptor, FilterMode.Bilinear);
             }
         }
 
@@ -142,7 +141,7 @@ namespace UnityEngine.Rendering.Universal
             descriptor.msaaSamples = 1;
             descriptor.dimension = TextureDimension.Tex2D;
 
-            cmd.GetTemporaryRT(pass.rendererData.cameraSortingLayerRenderTarget.id, descriptor, FilterMode.Bilinear);
+            cmd.GetTemporaryRT(pass.rendererData.cameraSortingLayerRenderTargetId, descriptor, FilterMode.Bilinear);
         }
 
         public static void EnableBlendStyle(CommandBuffer cmd, int blendStyleIndex, bool enabled)
@@ -167,9 +166,9 @@ namespace UnityEngine.Rendering.Universal
         {
             pass.rendererData.isNormalsRenderTargetValid = false;
             pass.rendererData.normalsRenderTargetScale = 0.0f;
-            cmd.ReleaseTemporaryRT(pass.rendererData.normalsRenderTarget.id);
-            cmd.ReleaseTemporaryRT(pass.rendererData.shadowsRenderTarget.id);
-            cmd.ReleaseTemporaryRT(pass.rendererData.cameraSortingLayerRenderTarget.id);
+            cmd.ReleaseTemporaryRT(pass.rendererData.normalsRenderTargetId);
+            cmd.ReleaseTemporaryRT(pass.rendererData.shadowsRenderTargetId);
+            cmd.ReleaseTemporaryRT(pass.rendererData.cameraSortingLayerRenderTargetId);
         }
 
         public static void DrawPointLight(CommandBuffer cmd, Light2D light, Mesh lightMesh, Material material)
@@ -177,6 +176,27 @@ namespace UnityEngine.Rendering.Universal
             var scale = new Vector3(light.pointLightOuterRadius, light.pointLightOuterRadius, light.pointLightOuterRadius);
             var matrix = Matrix4x4.TRS(light.transform.position, light.transform.rotation, scale);
             cmd.DrawMesh(lightMesh, matrix, material);
+        }
+
+
+        private static bool CanCastShadows(Light2D light, int layerToRender)
+        {
+            return light.shadowsEnabled && light.shadowIntensity > 0 && light.IsLitLayer(layerToRender);
+        }
+
+        private static bool CanCastVolumetricShadows(Light2D light, int endLayerValue)
+        {
+            var topMostLayerValue = light.GetTopMostLitLayer();
+            return light.volumetricShadowsEnabled && light.shadowVolumeIntensity > 0 && topMostLayerValue == endLayerValue;
+        }
+
+
+        private static bool ShouldRenderLight(Light2D light, int blendStyleIndex, int layerToRender)
+        {
+            return light != null &&
+                    light.lightType != Light2D.LightType.Global &&
+                    light.blendStyleIndex == blendStyleIndex &&
+                    light.IsLitLayer(layerToRender);
         }
 
         private static void RenderLightSet(IRenderPass2D pass, RenderingData renderingData, int blendStyleIndex, CommandBuffer cmd, int layerToRender, RenderTargetIdentifier renderTexture, List<Light2D> lights)
@@ -192,6 +212,8 @@ namespace UnityEngine.Rendering.Universal
             }
 
 
+            NativeArray<bool> doesLightAtIndexHaveShadows = new NativeArray<bool>(lights.Count, Allocator.Temp);
+
             // Break up light rendering into batches for the purpose of shadow casting
             var lightIndex = 0;
             while (lightIndex < lights.Count)
@@ -200,14 +222,19 @@ namespace UnityEngine.Rendering.Universal
                 var batchedLights = 0;
 
                 // Add lights to our batch until the number of shadow textures reach the maxShadowTextureCount
-                var shadowLightCount = 0;
+                int shadowLightCount = 0;
                 while (batchedLights < remainingLights && shadowLightCount < maxShadowLightCount)
                 {
-                    var light = lights[lightIndex + batchedLights];
-                    if (light.shadowsEnabled && light.shadowIntensity > 0 && light.IsLitLayer(layerToRender))
+                    int curLightIndex = lightIndex + batchedLights;
+                    var light = lights[curLightIndex];
+                    if (ShouldRenderLight(light, blendStyleIndex, layerToRender) && CanCastShadows(light, layerToRender))
                     {
-                        ShadowRendering.PrerenderShadows(pass, renderingData, cmd, layerToRender, light, shadowLightCount, light.shadowIntensity);
-                        shadowLightCount++;
+                        doesLightAtIndexHaveShadows[curLightIndex] = false;
+                        if (ShadowRendering.PrerenderShadows(pass, renderingData, cmd, layerToRender, light, shadowLightCount, light.shadowIntensity))
+                        {
+                            doesLightAtIndexHaveShadows[curLightIndex] = true;
+                            shadowLightCount++;
+                        }
                     }
                     batchedLights++;
                 }
@@ -226,10 +253,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var light = lights[(int)(lightIndex + lightIndexOffset)];
 
-                    if (light != null &&
-                        light.lightType != Light2D.LightType.Global &&
-                        light.blendStyleIndex == blendStyleIndex &&
-                        light.IsLitLayer(layerToRender))
+                    if (ShouldRenderLight(light, blendStyleIndex, layerToRender))
                     {
                         // Render light
                         var lightMaterial = pass.rendererData.GetLightMaterial(light, false);
@@ -241,7 +265,7 @@ namespace UnityEngine.Rendering.Universal
                             continue;
 
                         // Set the shadow texture to read from
-                        if (light.shadowsEnabled && light.shadowIntensity > 0)
+                        if (doesLightAtIndexHaveShadows[lightIndex + lightIndexOffset])
                             ShadowRendering.SetGlobalShadowTexture(cmd, light, shadowLightCount++);
                         else
                             ShadowRendering.DisableGlobalShadowTexture(cmd);
@@ -273,6 +297,8 @@ namespace UnityEngine.Rendering.Universal
 
                 lightIndex += batchedLights;
             }
+
+            doesLightAtIndexHaveShadows.Dispose();
         }
 
         public static void RenderLightVolumes(this IRenderPass2D pass, RenderingData renderingData, CommandBuffer cmd, int layerToRender, int endLayerValue,
@@ -280,6 +306,8 @@ namespace UnityEngine.Rendering.Universal
             RenderBufferStoreAction finalStoreAction, bool requiresRTInit, List<Light2D> lights)
         {
             var maxShadowLightCount = ShadowRendering.maxTextureCount * 4;  // Now encodes shadows into RGBA as well as seperate textures
+
+            NativeArray<bool> doesLightAtIndexHaveShadows = new NativeArray<bool>(lights.Count, Allocator.Temp);
 
             // This case should never happen, but if it does it may cause an infinite loop later.
             if (maxShadowLightCount < 1)
@@ -313,13 +341,17 @@ namespace UnityEngine.Rendering.Universal
                 var shadowLightCount = 0;
                 while (batchedLights < remainingLights && shadowLightCount < maxShadowLightCount)
                 {
-                    var light = lights[lightIndex + batchedLights];
+                    int curLightIndex = lightIndex + batchedLights;
+                    var light = lights[curLightIndex];
 
-                    var topMostLayerValue = light.GetTopMostLitLayer();
-                    if (light.renderVolumetricShadows && endLayerValue == topMostLayerValue)
+                    if (CanCastVolumetricShadows(light, endLayerValue))
                     {
-                        ShadowRendering.PrerenderShadows(pass, renderingData, cmd, layerToRender, light, shadowLightCount, light.shadowVolumeIntensity);
-                        shadowLightCount++;
+                        doesLightAtIndexHaveShadows[curLightIndex] = false;
+                        if (ShadowRendering.PrerenderShadows(pass, renderingData, cmd, layerToRender, light, shadowLightCount, light.shadowVolumeIntensity))
+                        {
+                            doesLightAtIndexHaveShadows[curLightIndex] = true;
+                            shadowLightCount++;
+                        }
                     }
                     batchedLights++;
                 }
@@ -351,7 +383,7 @@ namespace UnityEngine.Rendering.Universal
                         var lightMesh = light.lightMesh;
 
                         // Set the shadow texture to read from.
-                        if (light.volumetricShadowsEnabled && light.shadowVolumeIntensity > 0)
+                        if (doesLightAtIndexHaveShadows[lightIndex + lightIndexOffset])
                             ShadowRendering.SetGlobalShadowTexture(cmd, light, shadowLightCount++);
                         else
                             ShadowRendering.DisableGlobalShadowTexture(cmd);
@@ -384,6 +416,8 @@ namespace UnityEngine.Rendering.Universal
 
                 lightIndex += batchedLights;
             }
+
+            doesLightAtIndexHaveShadows.Dispose();
         }
 
         public static void SetShapeLightShaderGlobals(this IRenderPass2D pass, CommandBuffer cmd)
@@ -474,14 +508,14 @@ namespace UnityEngine.Rendering.Universal
                 if (!pass.rendererData.lightBlendStyles[i].isDirty)
                     continue;
 
-                cmd.SetRenderTarget(pass.rendererData.lightBlendStyles[i].renderTargetHandle.Identifier());
-                cmd.ClearRenderTarget(false, true, Color.black);
+                CoreUtils.SetRenderTarget(cmd, pass.rendererData.lightBlendStyles[i].renderTargetHandle, ClearFlag.Color, Color.black);
                 pass.rendererData.lightBlendStyles[i].isDirty = false;
             }
         }
 
-        public static void RenderNormals(this IRenderPass2D pass, ScriptableRenderContext context, RenderingData renderingData, DrawingSettings drawSettings, FilteringSettings filterSettings, RenderTargetIdentifier depthTarget, CommandBuffer cmd, LightStats lightStats)
+        public static void RenderNormals(this IRenderPass2D pass, ScriptableRenderContext context, RenderingData renderingData, DrawingSettings drawSettings, FilteringSettings filterSettings, RenderTargetIdentifier depthTarget, LightStats lightStats)
         {
+            var cmd = renderingData.commandBuffer;
             using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 // figure out the scale
@@ -497,20 +531,16 @@ namespace UnityEngine.Rendering.Universal
 
                 var msaaEnabled = renderingData.cameraData.cameraTargetDescriptor.msaaSamples > 1;
                 var storeAction = msaaEnabled ? RenderBufferStoreAction.Resolve : RenderBufferStoreAction.Store;
+                var clearFlag = pass.rendererData.useDepthStencilBuffer ? ClearFlag.All : ClearFlag.Color;
                 if (depthTarget != BuiltinRenderTextureType.None)
                 {
-                    cmd.SetRenderTarget(
-                        pass.rendererData.normalsRenderTarget.Identifier(),
-                        RenderBufferLoadAction.DontCare,
-                        storeAction,
-                        depthTarget,
-                        RenderBufferLoadAction.Load,
-                        RenderBufferStoreAction.Store);
+                    CoreUtils.SetRenderTarget(cmd,
+                        pass.rendererData.normalsRenderTarget, RenderBufferLoadAction.DontCare, storeAction,
+                        depthTarget, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store,
+                        clearFlag, k_NormalClearColor);
                 }
                 else
-                    cmd.SetRenderTarget(pass.rendererData.normalsRenderTarget.Identifier(), RenderBufferLoadAction.DontCare, storeAction);
-
-                cmd.ClearRenderTarget(false, true, k_NormalClearColor);
+                    CoreUtils.SetRenderTarget(cmd, pass.rendererData.normalsRenderTarget, RenderBufferLoadAction.DontCare, storeAction, clearFlag, k_NormalClearColor);
 
                 context.ExecuteCommandBuffer(cmd);
                 cmd.Clear();
@@ -595,11 +625,11 @@ namespace UnityEngine.Rendering.Universal
             bitIndex++;
             var pointCookieBit = (isPoint && light.lightCookieSprite != null && light.lightCookieSprite.texture != null) ? 1u << bitIndex : 0u;
             bitIndex++;
-            var pointFastQualityBit = (isPoint && light.normalMapQuality == Light2D.NormalMapQuality.Fast) ? 1u << bitIndex : 0u;
+            var fastQualityBit = (light.normalMapQuality == Light2D.NormalMapQuality.Fast) ? 1u << bitIndex : 0u;
             bitIndex++;
             var useNormalMap = light.normalMapQuality != Light2D.NormalMapQuality.Disabled ? 1u << bitIndex : 0u;
 
-            return pointFastQualityBit | pointCookieBit | spriteBit | additiveBit | shapeBit | volumeBit | useNormalMap;
+            return fastQualityBit | pointCookieBit | spriteBit | additiveBit | shapeBit | volumeBit | useNormalMap;
         }
 
         private static Material CreateLightMaterial(Renderer2DData rendererData, Light2D light, bool isVolume)
@@ -628,7 +658,7 @@ namespace UnityEngine.Rendering.Universal
             if (isPoint && light.lightCookieSprite != null && light.lightCookieSprite.texture != null)
                 material.EnableKeyword(k_UsePointLightCookiesKeyword);
 
-            if (isPoint && light.normalMapQuality == Light2D.NormalMapQuality.Fast)
+            if (light.normalMapQuality == Light2D.NormalMapQuality.Fast)
                 material.EnableKeyword(k_LightQualityFastKeyword);
 
             if (light.normalMapQuality != Light2D.NormalMapQuality.Disabled)

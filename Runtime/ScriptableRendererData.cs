@@ -5,6 +5,7 @@ using System.Reflection;
 #if UNITY_EDITOR
 using System.Linq;
 using UnityEditor;
+using ShaderKeywordFilter = UnityEditor.ShaderKeywordFilter;
 #endif
 
 namespace UnityEngine.Rendering.Universal
@@ -28,6 +29,12 @@ namespace UnityEngine.Rendering.Universal
             /// </summary>
             [Reload("Shaders/Debug/DebugReplacement.shader")]
             public Shader debugReplacementPS;
+
+            /// <summary>
+            /// Debug shader used to output HDR Chromacity mapping.
+            /// </summary>
+            [Reload("Shaders/Debug/HDRDebugView.shader")]
+            public Shader hdrDebugViewPS;
         }
 
         /// <summary>
@@ -68,6 +75,9 @@ namespace UnityEngine.Rendering.Universal
             return Create();
         }
 
+        /// <summary>
+        /// Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.
+        /// </summary>
         protected virtual void OnValidate()
         {
             SetDirty();
@@ -77,11 +87,17 @@ namespace UnityEngine.Rendering.Universal
 #endif
         }
 
+        /// <summary>
+        /// This function is called when the object becomes enabled and active.
+        /// </summary>
         protected virtual void OnEnable()
         {
             SetDirty();
         }
 
+        /// <summary>
+        /// Specifies whether the renderer should use Native Render Pass.
+        /// </summary>
         public bool useNativeRenderPass
         {
             get => m_UseNativeRenderPass;
@@ -134,7 +150,7 @@ namespace UnityEngine.Rendering.Universal
             // Collect valid, compiled sub-assets
             foreach (var asset in subassets)
             {
-                if (asset == null || asset.GetType().BaseType != typeof(ScriptableRendererFeature)) continue;
+                if (asset == null || !asset.GetType().IsSubclassOf(typeof(ScriptableRendererFeature))) continue;
                 AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out var guid, out long localId);
                 loadedAssets.Add(localId, asset);
                 debugOutput += $"-{asset.name}\n--localId={localId}\n";
@@ -184,8 +200,24 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool DuplicateFeatureCheck(Type type)
         {
-            var isSingleFeature = type.GetCustomAttribute(typeof(DisallowMultipleRendererFeature));
-            return isSingleFeature != null && m_RendererFeatures.Select(renderFeature => renderFeature.GetType()).Any(t => t == type);
+            Attribute isSingleFeature = type.GetCustomAttribute(typeof(DisallowMultipleRendererFeature));
+            if (isSingleFeature == null)
+                return false;
+
+            if (m_RendererFeatures == null)
+                return false;
+
+            for (int i = 0; i < m_RendererFeatures.Count; i++)
+            {
+                ScriptableRendererFeature feature = m_RendererFeatures[i];
+                if (feature == null)
+                    continue;
+
+                if (feature.GetType() == type)
+                    return true;
+            }
+
+            return false;
         }
 
         private static object GetUnusedAsset(ref List<long> usedIds, ref Dictionary<long, object> assets)

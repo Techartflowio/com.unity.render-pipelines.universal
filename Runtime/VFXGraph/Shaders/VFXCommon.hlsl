@@ -3,6 +3,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/AmbientOcclusion.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Editor/ShaderGraph/Includes/ShaderPass.hlsl"
 
@@ -25,6 +26,11 @@ float4 VFXApplyPreExposure(float4 color, VFX_VARYING_PS_INPUTS input)
 float4 VFXTransformFinalColor(float4 color)
 {
     return color;
+}
+
+float2 VFXGetNormalizedScreenSpaceUV(float4 clipPos)
+{
+    return GetNormalizedScreenSpaceUV(clipPos);
 }
 
 void VFXEncodeMotionVector(float2 velocity, out float4 outBuffer)
@@ -75,21 +81,41 @@ float3 VFXTransformPositionWorldToView(float3 posWS)
 
 float3 VFXTransformPositionWorldToCameraRelative(float3 posWS)
 {
-#if (VFX_WORLD_SPACE || SHADEROPTIONS_CAMERA_RELATIVE_RENDERING == 0)
-    return posWS - _WorldSpaceCameraPos.xyz;
-#else
-    return posWS;
+#if SHADEROPTIONS_CAMERA_RELATIVE_RENDERING
+#error VFX Camera Relative rendering isn't supported in URP.
 #endif
+    return posWS;
 }
+
+//Compatibility functions for the common ShaderGraph integration
+float4x4 ApplyCameraTranslationToMatrix(float4x4 modelMatrix)
+{
+    return modelMatrix;
+}
+float4x4 ApplyCameraTranslationToInverseMatrix(float4x4 inverseModelMatrix)
+{
+    return inverseModelMatrix;
+}
+//End of compatibility functions
 
 float4x4 VFXGetObjectToWorldMatrix()
 {
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_M)
+#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityObjectToWorld();
+#else
     return GetObjectToWorldMatrix();
+#endif
 }
 
 float4x4 VFXGetWorldToObjectMatrix()
 {
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_I_M)
+#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityWorldToObject();
+#else
     return GetWorldToObjectMatrix();
+#endif
 }
 
 float3x3 VFXGetWorldToViewRotMatrix()
@@ -137,6 +163,17 @@ void VFXApplyShadowBias(inout float4 posCS, inout float3 posWS)
     posCS = VFXTransformPositionWorldToClip(posWS);
 }
 
+float4 VFXApplyAO(float4 color, float4 posCS)
+{
+#if defined(_SCREEN_SPACE_OCCLUSION) && !defined(_SURFACE_TYPE_TRANSPARENT)
+    float2 normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(posCS);
+    AmbientOcclusionFactor aoFactor = GetScreenSpaceAmbientOcclusion(normalizedScreenSpaceUV);
+    color.rgb *= aoFactor.directAmbientOcclusion;
+#endif
+
+    return color;
+}
+
 float4 VFXApplyFog(float4 color,float4 posCS,float3 posWS)
 {
    float4 fog = (float4)0;
@@ -159,3 +196,18 @@ float3 VFXGetCameraWorldDirection()
 {
     return unity_CameraToWorld._m02_m12_m22;
 }
+
+#if defined(_GBUFFER_NORMALS_OCT)
+#define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
+{ \
+    float2 octNormalWS = PackNormalOctQuadEncode(normalWS);         /*values between [-1, +1], must use fp32 on some platforms*/ \
+    float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5); /*values between [ 0,  1]*/ \
+    half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);    /*values between [ 0,  1]*/ \
+	outNormalBuffer = float4(packedNormalWS, 0.0); \
+}
+#else
+#define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
+{ \
+    outNormalBuffer = float4(normalWS, 0.0); \
+}
+#endif

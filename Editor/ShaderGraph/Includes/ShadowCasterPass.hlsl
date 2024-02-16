@@ -14,12 +14,14 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
 {
     Varyings unpacked = UnpackVaryings(packedInput);
     UNITY_SETUP_INSTANCE_ID(unpacked);
+    SurfaceDescription surfaceDescription = BuildSurfaceDescription(unpacked);
 
-    SurfaceDescriptionInputs surfaceDescriptionInputs = BuildSurfaceDescriptionInputs(unpacked);
-    SurfaceDescription surfaceDescription = SurfaceDescriptionFunction(surfaceDescriptionInputs);
-
-    #if _ALPHATEST_ON
+    #if defined(_ALPHATEST_ON)
         clip(surfaceDescription.Alpha - surfaceDescription.AlphaClipThreshold);
+    #endif
+
+    #if defined(LOD_FADE_CROSSFADE) && USE_UNITY_CROSSFADE
+        LODFadeCrossFade(unpacked.positionCS);
     #endif
 
     return 0;

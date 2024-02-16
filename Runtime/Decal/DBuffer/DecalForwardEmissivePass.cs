@@ -4,7 +4,7 @@ namespace UnityEngine.Rendering.Universal
 {
     internal class DecalDrawFowardEmissiveSystem : DecalDrawSystem
     {
-        public DecalDrawFowardEmissiveSystem(DecalEntityManager entityManager) : base("DecalDrawFowardEmissiveSystem.Execute", entityManager) {}
+        public DecalDrawFowardEmissiveSystem(DecalEntityManager entityManager) : base("DecalDrawFowardEmissiveSystem.Execute", entityManager) { }
         protected override int GetPassIndex(DecalCachedChunk decalCachedChunk) => decalCachedChunk.passIndexEmissive;
     }
 
@@ -33,18 +33,15 @@ namespace UnityEngine.Rendering.Universal
             SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
             DrawingSettings drawingSettings = CreateDrawingSettings(m_ShaderTagIdList, ref renderingData, sortingCriteria);
 
-            CommandBuffer cmd = CommandBufferPool.Get();
+            var cmd = renderingData.commandBuffer;
             using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 context.ExecuteCommandBuffer(cmd);
                 cmd.Clear();
-
                 m_DrawSystem.Execute(cmd);
 
                 context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref m_FilteringSettings);
             }
-            context.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
         }
     }
 }

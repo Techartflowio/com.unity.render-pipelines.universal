@@ -3,6 +3,7 @@ using UnityEngine.Serialization;
 using UnityEngine.Scripting.APIUpdating;
 using UnityEngine.U2D;
 #if UNITY_EDITOR
+using System.Linq;
 using UnityEditor.Experimental.SceneManagement;
 #endif
 
@@ -57,7 +58,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
-        /// The accuracy of how the normap map calculation.
+        /// The accuracy of how the normal map calculation.
         /// </summary>
         public enum NormalMapQuality
         {
@@ -85,7 +86,7 @@ namespace UnityEngine.Rendering.Universal
             /// </summary>
             Additive,
             /// <summary>
-            /// Colors are blended using standed blending (alpha, 1-alpha)
+            /// Colors are blended using standard blending (alpha, 1-alpha)
             /// </summary>
             AlphaBlend
         }
@@ -116,7 +117,7 @@ namespace UnityEngine.Rendering.Universal
         [FormerlySerializedAs("m_LightVolumeOpacity")]
         [SerializeField] float m_LightVolumeIntensity = 1.0f;
         [SerializeField] bool m_LightVolumeIntensityEnabled = false;
-        [SerializeField] int[] m_ApplyToSortingLayers = new int[1];     // These are sorting layer IDs. If we need to update this at runtime make sure we add code to update global lights
+        [SerializeField] int[] m_ApplyToSortingLayers;  // These are sorting layer IDs. If we need to update this at runtime make sure we add code to update global lights
 
         [Reload("Textures/2D/Sparkle.png")]
         [SerializeField] Sprite m_LightCookieSprite;
@@ -125,6 +126,8 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] Sprite m_DeprecatedPointLightCookieSprite;
 
         [SerializeField] int m_LightOrder = 0;
+
+        [SerializeField] bool m_AlphaBlendOnOverlap = false; // This is now deprecated. Keep it here for backwards compatibility.
 
         [SerializeField] OverlapOperation m_OverlapOperation = OverlapOperation.Additive;
 
@@ -147,13 +150,12 @@ namespace UnityEngine.Rendering.Universal
         [Range(0, 1)]
         [SerializeField] float m_ShadowVolumeIntensity = 0.75f;
 
-
         Mesh m_Mesh;
 
-        [SerializeField]
+        [NonSerialized]
         private LightUtility.LightMeshVertex[] m_Vertices = new LightUtility.LightMeshVertex[1];
 
-        [SerializeField]
+        [NonSerialized]
         private ushort[] m_Triangles = new ushort[1];
 
         internal LightUtility.LightMeshVertex[] vertices { get { return m_Vertices; } set { m_Vertices = value; } }
@@ -184,6 +186,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool hasCachedMesh => (vertices.Length > 1 && indices.Length > 1);
 
+        internal bool forceUpdate = false;
 
         /// <summary>
         /// The light's current type
@@ -194,7 +197,7 @@ namespace UnityEngine.Rendering.Universal
             set
             {
                 if (m_LightType != value)
-                    UpdateMesh(true);
+                    UpdateMesh();
 
                 m_LightType = value;
                 Light2DManager.ErrorIfDuplicateGlobalLight(this);
@@ -246,7 +249,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Controls the visibility of the light's volume
         /// </summary>
-        public float volumeIntensity => m_LightVolumeIntensity;
+        public float volumeIntensity { get => m_LightVolumeIntensity; set => m_LightVolumeIntensity = value; }
         /// <summary>
         /// Enables or disables the light's volume
         /// </summary>
@@ -254,19 +257,23 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// The Sprite that's used by the Sprite Light type to control the shape light
         /// </summary>
-        public Sprite lightCookieSprite { get { return m_LightType != LightType.Point ? m_LightCookieSprite : m_DeprecatedPointLightCookieSprite; } }
+        public Sprite lightCookieSprite { get { return m_LightType != LightType.Point ? m_LightCookieSprite : m_DeprecatedPointLightCookieSprite; } set => m_LightCookieSprite = value; }
         /// <summary>
         /// Controls the brightness and distance of the fall off (edge) of the light
         /// </summary>
-        public float falloffIntensity => m_FalloffIntensity;
-
-        [Obsolete]
-        public bool alphaBlendOnOverlap { get { return m_OverlapOperation == OverlapOperation.AlphaBlend; }}
+        public float falloffIntensity { get => m_FalloffIntensity; set => m_FalloffIntensity = Mathf.Clamp(value, 0, 1); }
 
         /// <summary>
-        /// Returns the overlap operation mode.
+        /// Checks if the alpha overlap operation is alpha blend.
+        /// This is obsolete.
         /// </summary>
-        public OverlapOperation overlapOperation => m_OverlapOperation;
+        [Obsolete]
+        public bool alphaBlendOnOverlap { get { return m_OverlapOperation == OverlapOperation.AlphaBlend; } }
+
+        /// <summary>
+        /// Controls the overlap operation mode.
+        /// </summary>
+        public OverlapOperation overlapOperation { get => m_OverlapOperation; set => m_OverlapOperation = value; }
 
         /// <summary>
         /// Gets or sets the light order. The lightOrder determines the order in which the lights are rendered onto the light textures.
@@ -283,8 +290,15 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public NormalMapQuality normalMapQuality => m_NormalMapQuality;
 
+        /// <summary>
+        /// Returns if volumetric shadows should be rendered.
+        /// </summary>
         public bool renderVolumetricShadows => volumetricShadowsEnabled && shadowVolumeIntensity > 0;
 
+        internal void MarkForUpdate()
+        {
+            forceUpdate = true;
+        }
 
         internal void CacheValues()
         {
@@ -322,7 +336,7 @@ namespace UnityEngine.Rendering.Universal
             return LightUtility.GenerateSpriteMesh(this, m_LightCookieSprite);
         }
 
-        internal void UpdateMesh(bool forceUpdate)
+        internal void UpdateMesh(bool forceUpdate = false)
         {
             var shapePathHash = LightUtility.GetShapePathHash(shapePath);
             var fallOffSizeChanged = LightUtility.CheckForChange(m_ShapeLightFalloffSize, ref m_PreviousShapeLightFalloffSize);
@@ -334,8 +348,9 @@ namespace UnityEngine.Rendering.Universal
             var lightTypeChanged = LightUtility.CheckForChange(m_LightType, ref m_PreviousLightType);
             var hashChanged = fallOffSizeChanged || parametricRadiusChanged || parametricSidesChanged ||
                 parametricAngleOffsetChanged || spriteInstanceChanged || shapePathHashChanged || lightTypeChanged;
+
             // Mesh Rebuilding
-            if (hashChanged && forceUpdate)
+            if (hashChanged || forceUpdate)
             {
                 switch (m_LightType)
                 {
@@ -385,28 +400,32 @@ namespace UnityEngine.Rendering.Universal
 
         private void Awake()
         {
-            if (m_LightCookieSprite != null)
-            {
-                bool updateMesh = !hasCachedMesh || (m_LightType == LightType.Sprite && m_LightCookieSprite.packed);
-                UpdateMesh(updateMesh);
-                if (hasCachedMesh)
-                {
-                    lightMesh.SetVertexBufferParams(vertices.Length, LightUtility.LightMeshVertex.VertexLayout);
-                    lightMesh.SetVertexBufferData(vertices, 0, 0, vertices.Length);
-                    lightMesh.SetIndices(indices, MeshTopology.Triangles, 0, false);
-                }
-            }
+#if UNITY_EDITOR
+            // Default target sorting layers to "All"
+            if (m_ApplyToSortingLayers == null)
+                m_ApplyToSortingLayers = SortingLayer.layers.Select(x => x.id).ToArray();
+#endif
         }
 
         void OnEnable()
         {
             m_PreviousLightCookieSprite = lightCookieSpriteInstanceID;
             Light2DManager.RegisterLight(this);
+
+#if UNITY_EDITOR
+            SortingLayer.onLayerAdded += OnSortingLayerAdded;
+            SortingLayer.onLayerRemoved += OnSortingLayerRemoved;
+#endif
         }
 
         private void OnDisable()
         {
             Light2DManager.DeregisterLight(this);
+
+#if UNITY_EDITOR
+            SortingLayer.onLayerAdded -= OnSortingLayerAdded;
+            SortingLayer.onLayerRemoved -= OnSortingLayerRemoved;
+#endif
         }
 
         private void LateUpdate()
@@ -414,15 +433,35 @@ namespace UnityEngine.Rendering.Universal
             if (m_LightType == LightType.Global)
                 return;
 
-            UpdateMesh(true);
+            UpdateMesh(forceUpdate);
             UpdateBoundingSphere();
+
+            forceUpdate = false;
         }
 
+#if UNITY_EDITOR
+        private void OnSortingLayerAdded(SortingLayer layer)
+        {
+            m_ApplyToSortingLayers = m_ApplyToSortingLayers.Append(layer.id).ToArray();
+        }
+
+        private void OnSortingLayerRemoved(SortingLayer layer)
+        {
+            m_ApplyToSortingLayers = m_ApplyToSortingLayers.Where(x => x != layer.id && SortingLayer.IsValid(x)).ToArray();
+        }
+#endif
+
+        /// <summary>
+        /// OnBeforeSerialize implementation.
+        /// </summary>
         public void OnBeforeSerialize()
         {
             m_ComponentVersion = k_CurrentComponentVersion;
         }
 
+        /// <summary>
+        /// OnAfterSerialize implementation.
+        /// </summary>
         public void OnAfterDeserialize()
         {
             // Upgrade from no serialized version
@@ -432,6 +471,7 @@ namespace UnityEngine.Rendering.Universal
                 m_ShadowIntensityEnabled = m_ShadowIntensity > 0;
                 m_LightVolumeIntensityEnabled = m_LightVolumeIntensity > 0;
                 m_NormalMapQuality = !m_UseNormalMap ? NormalMapQuality.Disabled : m_NormalMapQuality;
+                m_OverlapOperation = m_AlphaBlendOnOverlap ? OverlapOperation.AlphaBlend : m_OverlapOperation;
                 m_ComponentVersion = ComponentVersions.Version_1;
             }
         }

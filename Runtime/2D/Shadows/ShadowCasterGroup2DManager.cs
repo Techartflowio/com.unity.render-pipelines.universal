@@ -26,7 +26,7 @@ namespace UnityEngine.Rendering.Universal
 
         private static void OnPlayModeStateChanged(PlayModeStateChange state)
         {
-            if (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.ExitingPlayMode)
+            if (s_ShadowCasterGroups != null && (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.ExitingPlayMode))
                 s_ShadowCasterGroups.Clear();
         }
 
@@ -83,7 +83,7 @@ namespace UnityEngine.Rendering.Universal
             ShadowCasterGroup2D newShadowCasterGroup = FindTopMostCompositeShadowCaster(shadowCaster) as ShadowCasterGroup2D;
 
             if (newShadowCasterGroup == null)
-                newShadowCasterGroup = shadowCaster.GetComponent<ShadowCaster2D>();
+                shadowCaster.TryGetComponent<ShadowCasterGroup2D>(out newShadowCasterGroup);
 
             if (newShadowCasterGroup != null && shadowCasterGroup != newShadowCasterGroup)
             {
@@ -99,6 +99,9 @@ namespace UnityEngine.Rendering.Universal
         {
             if (shadowCasterGroup != null)
                 shadowCasterGroup.UnregisterShadowCaster2D(shadowCaster);
+
+            if (shadowCasterGroup == shadowCaster)
+                RemoveGroup(shadowCasterGroup);
         }
 
         public static void AddGroup(ShadowCasterGroup2D group)

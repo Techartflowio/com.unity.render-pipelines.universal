@@ -1,6 +1,10 @@
 # Deferred Rendering Path in URP
 
-URP Universal Renderer supports two Rendering Paths: Forward and Deferred.
+URP Universal Renderer supports the following Rendering Paths:
+
+* Forward
+* Forward+
+* Deferred
 
 For information on differences between the rendering paths, see section [Rendering Path comparison](../urp-universal-renderer.md#rendering-path-comparison).
 
@@ -34,7 +38,7 @@ The **Accurate G-buffer normals** property lets you configure how Unity encodes 
 
 * **Accurate G-buffer normals** off: This option increases performance, especially on mobile GPUs, but might lead to color banding artifacts on smooth surfaces.
 
-* **Accurate G-buffer normals** on: Unity uses the octahedron encoding to store values of normal vectors in the RGB channel of a normal texture. With this encoding, values of normal vectors are more accurate, but the encoding and decoding operations put extra load on the GPU.
+* **Accurate G-buffer normals** on: Unity uses the octahedron encoding to store values of normal vectors in the RGB channel of a normal texture. With this encoding, values of normal vectors are more accurate, but the encoding and decoding operations put extra load on the GPU. This option does not support decal normal blending when used with the [Screen Space decal technique](../renderer-feature-decal.md#screen-space-technique).
 
 For more information about this setting, see the section [Encoding of normals in G-buffer](#accurate-g-buffer-normals).
 
@@ -44,7 +48,7 @@ The Deferred Rendering Path has the following requirements and limitations on to
 
 * Minimum Shader Model: Shader Model 4.5.
 
-* Deferred Rendering Path does not support the OpenGL-based graphics API: Desktop&#160;OpenGL, OpenGL&#160;ES&#160;2.0, OpenGL&#160;ES&#160;3.0, WebGL&#160;1.0, WebGL&#160;2.0.
+* Deferred Rendering Path does not support the OpenGL and OpenGL ES API.<br/>If a project with the Deferred Rendering Path is built for platforms using those API, the application falls back to the Forward Rendering Path.
 
 ## Implementation details
 
@@ -68,13 +72,15 @@ This field contains the albedo color in sRGB format, 24 bits.
 
 This field is a bit field that contains Material flags:
 
-* Bit 1, **ReceiveShadowsOff**: if set, the pixel does not receive dynamic shadows.
+* Bit 0, **ReceiveShadowsOff**: if set, the pixel does not receive dynamic shadows.
 
-* Bit 2, **SpecularHighlightsOff**: if set, the pixel does not receive specular highlights.
+* Bit 1, **SpecularHighlightsOff**: if set, the pixel does not receive specular highlights.
 
-* Bit 4, **SubtractiveMixedLighting**: if set, the pixel uses subtractive mixed lighting.
+* Bit 2, **SubtractiveMixedLighting**: if set, the pixel uses subtractive mixed lighting.
 
-* Bit 8, **SpecularSetup**: if set, the Material uses the specular workflow.
+* Bit 3, **SpecularSetup**: if set, the Material uses the specular workflow.
+
+Bits 4-7 are reserved for future use.
 
 For more technical details, see the file `/ShaderLibrary/UnityGBuffer.hlsl`.
 
@@ -124,7 +130,9 @@ The Subtractive and the Shadow mask modes are optimized for the Forward Renderin
 
 **Rendering Layer Mask**
 
-Unity adds this render target to the G-buffer layout when the Light Layers feature is enabled (URP Asset, **Advanced** > **Light Layers**). The Light Layers feature might have a significant impact on the GPU performance. For more information, see section [Light Layers](#light-layers).
+Unity adds this render target to the G-buffer layout when the Use Rendering Layers option is enabled (URP Asset, **Lighting** > **Use Rendering Layers**). 
+
+Using Rendering Layers might have an impact on the GPU performance. For more information, see the page [Rendering Layers](../features/rendering-layers.md#performance).
 
 **Depth as Color**
 
@@ -154,7 +162,7 @@ The **Accurate G-buffer normals** property lets you configure how Unity encodes 
 
 * **Accurate G-buffer normals** off: Unity stores values of normal vectors in the G-buffer in the RGB channel of a normal texture, 8 bit per value (x, y, z). The values are quantized with the loss of accuracy. This option increases performance, especially on mobile GPUs, but might lead to color banding artifacts on smooth surfaces.
 
-* **Accurate G-buffer normals** on: Unity uses the octahedron encoding to store values of normal vectors in the RGB channel of a normal texture. With this encoding, values of normal vectors are more accurate, but the encoding and decoding operations put extra load on the GPU.<br/>The precision of the encoded normal vectors is similar to the precision of the sampled values in the Forward Rendering Path.
+* **Accurate G-buffer normals** on: Unity uses the octahedron encoding to store values of normal vectors in the RGB channel of a normal texture. With this encoding, values of normal vectors are more accurate, but the encoding and decoding operations put extra load on the GPU. This option does not support decal normal blending when used with the [Screen Space decal technique](../renderer-feature-decal.md#screen-space-technique).<br/>The precision of the encoded normal vectors is similar to the precision of the sampled values in the Forward Rendering Path.
 
 The following illustration shows the visual difference between the two options when the Camera is very close to the GameObject:
 
@@ -409,17 +417,15 @@ The Deferred Rendering Path supports the Subtractive and the Shadowmask Lighting
 
 In the Deferred Rendering Path, the Baked Indirect Lighting mode provides better performance, since it does not require the ShadowMask render target.
 
-### Light layers
+### Rendering layers
 
-URP implements the Light Layers feature that lets you configure which Lights in a Scene affect specific meshes. Lights assigned to a specific Light Layer only affect the meshes assigned to the same Light Layer.
+URP implements the Rendering Layers feature that lets you configure which Lights in a Scene affect specific meshes. Lights assigned to a specific Rendering Layer only affect the meshes assigned to the same Rendering Layer.
 
-To enable the Light Layers feature: in the URP Asset, select **Advanced** > **Light Layers**.
-
-![Light Layers check box.](../Images/rendering-deferred/urp-asset-light-layers.png)
+For more information on Rendering Layers, see the page [Rendering Layers](../features/rendering-layers.md).
 
 **Performance impact**
 
-The Light Layers feature requires an extra G-buffer render target to store the rendering layer mask (32 bits). The extra render target is likely to have a negative impact on GPU performance.
+The Rendering Layers feature requires an extra G-buffer render target to store the rendering layer mask (32 bits). The extra render target is likely to have a negative impact on GPU performance.
 
 **Implementation notes**
 
