@@ -64,6 +64,8 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         SpeedTree8,
         // If you add a value here, also add it to ShaderID in Editor/ShaderUtils.cs
+        
+        SG_ParticleGuiUnlit,
     }
 
     /// <summary>

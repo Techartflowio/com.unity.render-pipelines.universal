@@ -116,6 +116,7 @@ namespace UnityEditor.VFX.URP
                 {
                     case ShaderUtils.ShaderID.SG_Unlit: return "Unlit";
                     case ShaderUtils.ShaderID.SG_SpriteUnlit: return "Sprite Unlit";
+                    case ShaderUtils.ShaderID.SG_ParticleGuiUnlit: return "Particle Gui unlit";
                     case ShaderUtils.ShaderID.SG_Lit: return "Lit";
                     case ShaderUtils.ShaderID.SG_SpriteLit: return "Sprite Lit";
                     case ShaderUtils.ShaderID.SG_SpriteCustomLit: return "Sprite Custom Lit";

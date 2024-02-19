@@ -28,6 +28,7 @@ namespace Unity.Rendering.Universal
             SpeedTree7 = ShaderPathID.SpeedTree7,
             SpeedTree7Billboard = ShaderPathID.SpeedTree7Billboard,
             SpeedTree8 = ShaderPathID.SpeedTree8,
+            SG_ParticleGuiUnlit = ShaderPathID.SG_ParticleGuiUnlit,
 
             // ShaderGraph IDs start at 1000, correspond to subtargets
             SG_Unlit = 1000,        // UniversalUnlitSubTarget
@@ -35,7 +36,7 @@ namespace Unity.Rendering.Universal
             SG_Decal,               // UniversalDecalSubTarget
             SG_SpriteUnlit,         // UniversalSpriteUnlitSubTarget
             SG_SpriteLit,           // UniversalSpriteLitSubTarget
-            SG_SpriteCustomLit      // UniversalSpriteCustomLitSubTarget
+            SG_SpriteCustomLit,     // UniversalSpriteCustomLitSubTarget
         }
 
         internal static bool IsShaderGraph(this ShaderID id)
@@ -133,6 +134,8 @@ namespace Unity.Rendering.Universal
                 case ShaderID.SG_SpriteLit:
                     break;
                 case ShaderID.SG_SpriteCustomLit:
+                    break;
+                case ShaderID.SG_ParticleGuiUnlit:
                     break;
                 default:
                     break;

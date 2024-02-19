@@ -40,6 +40,11 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
         /// Use this for Sprite unlit.
         /// </summary>
         SpriteUnlit,
+        
+        /// <summary>
+        /// Use this for Particle Gui unlit.
+        /// </summary>
+        SG_ParticleGuiUnlit,
     }
 
     /// <summary>
