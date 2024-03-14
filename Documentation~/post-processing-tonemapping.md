@@ -1,10 +1,10 @@
 # Tonemapping
 
-Tonemapping is the process of remapping the HDR values of an image to a new range of values. Its most common purpose is to make an image with a low dynamic range appear to have a higher range. See Wikipedia: Tone mapping.
+Tonemapping is the process of remapping the HDR values of an image to a new range of values. Its most common purpose is to make an image with a low dynamic range appear to have a higher range. For more information, refer to the [Wikipedia article on Tone mapping](https://en.wikipedia.org/wiki/Tone_mapping).
 
 ## Using Tonemapping
 
-**Tonemapping**  uses the [Volume](Volumes.md) system, so to enable and modify **Tonemapping** properties, you must add a **Tonemapping** override to a [Volume](Volumes.md) in your Scene.
+**Tonemapping**  uses the [Volume](Volumes.md) system, so to enable and modify **Tonemapping** properties, you must add a **Tonemapping** override to a [Volume](Volumes.md) in your scene.
 
 To add **Tonemapping** to a Volume:
 

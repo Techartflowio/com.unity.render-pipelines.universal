@@ -88,6 +88,7 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary>
         /// Disposable pattern implementation.
+        /// Cleans up resources used by the renderer.
         /// </summary>
         public void Dispose()
         {

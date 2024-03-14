@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -203,13 +204,27 @@ namespace UnityEngine.Rendering.Universal
 
             cmd.SetViewport(new Rect(shadowSliceData.offsetX, shadowSliceData.offsetY, shadowSliceData.resolution, shadowSliceData.resolution));
             cmd.SetViewProjectionMatrices(view, proj);
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
-            context.DrawShadows(ref settings);
+            var rl = context.CreateShadowRendererList(ref settings);
+            cmd.DrawRendererList(rl);
             cmd.DisableScissorRect();
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
 
+            cmd.SetGlobalDepthBias(0.0f, 0.0f); // Restore previous depth bias values
+        }
+
+        internal static void RenderShadowSlice(RasterCommandBuffer cmd,
+            ref ShadowSliceData shadowSliceData, ref RendererList shadowRendererList,
+            Matrix4x4 proj, Matrix4x4 view)
+        {
+            cmd.SetGlobalDepthBias(1.0f, 2.5f); // these values match HDRP defaults (see https://github.com/Unity-Technologies/Graphics/blob/9544b8ed2f98c62803d285096c91b44e9d8cbc47/com.unity.render-pipelines.high-definition/Runtime/Lighting/Shadow/HDShadowAtlas.cs#L197 )
+
+            cmd.SetViewport(new Rect(shadowSliceData.offsetX, shadowSliceData.offsetY, shadowSliceData.resolution, shadowSliceData.resolution));
+            cmd.SetViewProjectionMatrices(view, proj);
+            if(shadowRendererList.isValid)
+                cmd.DrawRendererList(shadowRendererList);
+
+            cmd.DisableScissorRect();
             cmd.SetGlobalDepthBias(0.0f, 0.0f); // Restore previous depth bias values
         }
 
@@ -395,6 +410,11 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="shadowBias"></param>
         public static void SetupShadowCasterConstantBuffer(CommandBuffer cmd, ref VisibleLight shadowLight, Vector4 shadowBias)
         {
+            SetupShadowCasterConstantBuffer(CommandBufferHelpers.GetRasterCommandBuffer(cmd), ref shadowLight, shadowBias);
+        }
+
+        internal static void SetupShadowCasterConstantBuffer(RasterCommandBuffer cmd, ref VisibleLight shadowLight, Vector4 shadowBias)
+        {
             cmd.SetGlobalVector("_ShadowBias", shadowBias);
 
             // Light direction is currently used in shadow caster pass to apply shadow normal offset (normal bias).
@@ -410,9 +430,7 @@ namespace UnityEngine.Rendering.Universal
         {
             var format = Experimental.Rendering.GraphicsFormatUtility.GetDepthStencilFormat(bits, 0);
             RenderTextureDescriptor rtd = new RenderTextureDescriptor(width, height, Experimental.Rendering.GraphicsFormat.None, format);
-            rtd.shadowSamplingMode = (RenderingUtils.SupportsRenderTextureFormat(RenderTextureFormat.Shadowmap)
-                                      && (SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES2)) ?
-                ShadowSamplingMode.CompareDepths : ShadowSamplingMode.None;
+            rtd.shadowSamplingMode = RenderingUtils.SupportsRenderTextureFormat(RenderTextureFormat.Shadowmap) ? ShadowSamplingMode.CompareDepths : ShadowSamplingMode.None;
             return rtd;
         }
 
@@ -424,7 +442,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="height">The height of the texture.</param>
         /// <param name="bits">The number of depth bits.</param>
         /// <returns>A shadow render texture.</returns>
-        [Obsolete("Use AllocShadowRT or ShadowRTReAllocateIfNeeded")]
+        [Obsolete("Use AllocShadowRT or ShadowRTReAllocateIfNeeded", true)]
         public static RenderTexture GetTemporaryShadowTexture(int width, int height, int bits)
         {
             var rtd = GetTemporaryShadowTextureDescriptor(width, height, bits);
@@ -556,13 +574,13 @@ namespace UnityEngine.Rendering.Universal
             return true;
         }
 
-        internal static void SetPerLightSoftShadowKeyword(CommandBuffer cmd, bool hasSoftShadows)
+        internal static void SetPerLightSoftShadowKeyword(RasterCommandBuffer cmd, bool hasSoftShadows)
         {
             if (SupportsPerLightSoftShadowQuality())
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.SoftShadows, hasSoftShadows);
         }
 
-        internal static void SetSoftShadowQualityShaderKeywords(CommandBuffer cmd, ref ShadowData shadowData)
+        internal static void SetSoftShadowQualityShaderKeywords(RasterCommandBuffer cmd, ref ShadowData shadowData)
         {
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.SoftShadows, shadowData.isKeywordSoftShadowsEnabled);
             if (SupportsPerLightSoftShadowQuality())

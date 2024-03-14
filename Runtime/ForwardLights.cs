@@ -6,6 +6,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal.Internal
 {
@@ -175,7 +176,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         {
             if (m_UseForwardPlus)
             {
-                using var _ = new ProfilingScope(null, m_ProfilingSamplerFPSetup);
+                using var _ = new ProfilingScope(m_ProfilingSamplerFPSetup);
 
                 if (!m_CullingHandle.IsCompleted)
                 {
@@ -251,7 +252,26 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 var worldToViews = new Fixed2<float4x4>(cameraData.GetViewMatrix(0), cameraData.GetViewMatrix(math.min(1, viewCount - 1)));
                 var viewToClips = new Fixed2<float4x4>(cameraData.GetProjectionMatrix(0), cameraData.GetProjectionMatrix(math.min(1, viewCount - 1)));
-                
+
+                // Should probe come after otherProbe?
+                static bool IsProbeGreater(VisibleReflectionProbe probe, VisibleReflectionProbe otherProbe)
+                {
+                    return probe.importance < otherProbe.importance || probe.bounds.extents.sqrMagnitude > otherProbe.bounds.extents.sqrMagnitude;
+                }
+
+                for (var i = 1; i < reflectionProbeCount; i++)
+                {
+                    var probe = reflectionProbes[i];
+                    var j = i - 1;
+                    while (j >= 0 && IsProbeGreater(reflectionProbes[j], probe))
+                    {
+                        reflectionProbes[j + 1] = reflectionProbes[j];
+                        j--;
+                    }
+
+                    reflectionProbes[j + 1] = probe;
+                }
+
                 var minMaxZs = new NativeArray<float2>(itemsPerTile * viewCount, Allocator.TempJob);
 
                 var lightMinMaxZJob = new LightMinMaxZJob
@@ -342,25 +362,55 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// <param name="renderingData"></param>
         public void Setup(ScriptableRenderContext context, ref RenderingData renderingData)
         {
+            SetupLights(renderingData.commandBuffer, ref renderingData);
+        }
+
+        static ProfilingSampler s_SetupForwardLights = new ProfilingSampler("Setup Forward lights.");
+        private class SetupLightPassData
+        {
+            internal RenderingData renderingData;
+            internal ForwardLights forwardLights;
+        };
+        /// <summary>
+        /// Sets up the ForwardLight data for RenderGraph execution
+        /// </summary>
+        internal void SetupRenderGraphLights(RenderGraph renderGraph, ref RenderingData renderingData)
+        {
+            using (var builder = renderGraph.AddLowLevelPass<SetupLightPassData>("SetupForwardLights", out var passData,
+                s_SetupForwardLights))
+            {
+                passData.renderingData = renderingData;
+                passData.forwardLights = this;
+
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((SetupLightPassData data, LowLevelGraphContext rgContext) =>
+                {
+                    data.forwardLights.SetupLights(rgContext.legacyCmd, ref data.renderingData);
+                });
+            }
+        }
+
+        internal void SetupLights(CommandBuffer cmd, ref RenderingData renderingData)
+        {
             int additionalLightsCount = renderingData.lightData.additionalLightsCount;
             bool additionalLightsPerVertex = renderingData.lightData.shadeAdditionalLightsPerVertex;
-            var cmd = renderingData.commandBuffer;
-            using (new ProfilingScope(null, m_ProfilingSampler))
+            using (new ProfilingScope(m_ProfilingSampler))
             {
                 if (m_UseForwardPlus)
                 {
                     m_ReflectionProbeManager.UpdateGpuData(cmd, ref renderingData);
 
-                    using (new ProfilingScope(null, m_ProfilingSamplerFPComplete))
+                    using (new ProfilingScope(m_ProfilingSamplerFPComplete))
                     {
                         m_CullingHandle.Complete();
                     }
 
-                    using (new ProfilingScope(null, m_ProfilingSamplerFPUpload))
+                    using (new ProfilingScope(m_ProfilingSamplerFPUpload))
                     {
                         m_ZBinsBuffer.SetData(m_ZBins.Reinterpret<float4>(UnsafeUtility.SizeOf<uint>()));
                         m_TileMasksBuffer.SetData(m_TileMasks.Reinterpret<float4>(UnsafeUtility.SizeOf<uint>()));
-                        cmd.SetGlobalConstantBuffer(m_ZBinsBuffer, "URP_ZBinBuffer", 0, UniversalRenderPipeline.maxZBinWords * 4);
+                        cmd.SetGlobalConstantBuffer(m_ZBinsBuffer, "urp_ZBinBuffer", 0, UniversalRenderPipeline.maxZBinWords * 4);
                         cmd.SetGlobalConstantBuffer(m_TileMasksBuffer, "urp_TileBuffer", 0, UniversalRenderPipeline.maxTileWords * 4);
                     }
 
@@ -390,42 +440,36 @@ namespace UnityEngine.Rendering.Universal.Internal
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ReflectionProbeBoxProjection, renderingData.lightData.reflectionProbeBoxProjection);
 
                 var asset = UniversalRenderPipeline.asset;
+                bool apvIsEnabled = asset != null && asset.lightProbeSystem == LightProbeSystem.ProbeVolumes;
+                ProbeVolumeSHBands probeVolumeSHBands = asset.probeVolumeSHBands;
 
-                // TODO: If we can robustly detect LIGHTMAP_ON, we can skip SH logic.
-                {
-                    ShEvalMode ShAutoDetect(ShEvalMode mode)
-                    {
-                        if (mode == ShEvalMode.Auto)
-                        {
-                            if (PlatformAutoDetect.isXRMobile)
-                                return ShEvalMode.PerVertex;
-                            else
-                                return ShEvalMode.PerPixel;
-                        }
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ProbeVolumeL1, apvIsEnabled && probeVolumeSHBands == ProbeVolumeSHBands.SphericalHarmonicsL1);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ProbeVolumeL2, apvIsEnabled && probeVolumeSHBands == ProbeVolumeSHBands.SphericalHarmonicsL2);
 
-                        return mode;
-                    }
+                var shMode = PlatformAutoDetect.ShAutoDetect(asset.shEvalMode);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.EVALUATE_SH_MIXED, shMode == ShEvalMode.Mixed);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.EVALUATE_SH_VERTEX, shMode == ShEvalMode.PerVertex);
 
-                    var shMode = ShAutoDetect(asset.shEvalMode);
+                var stack = VolumeManager.instance.stack;
 
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.EVALUATE_SH_MIXED, shMode == ShEvalMode.Mixed);
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.EVALUATE_SH_VERTEX, shMode == ShEvalMode.PerVertex);
-                }
+                bool enableProbeVolumes = ProbeReferenceVolume.instance.UpdateShaderVariablesProbeVolumes(cmd,
+                    stack.GetComponent<ProbeVolumesOptions>(),
+                    renderingData.cameraData.IsTemporalAAEnabled() ? Time.frameCount : 0);
+
+                cmd.SetGlobalInt("_EnableProbeVolumes", enableProbeVolumes ? 1 : 0);
 
                 bool lightLayers = renderingData.lightData.supportsLightLayers;
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.LightLayers, lightLayers && !CoreUtils.IsSceneLightingDisabled(renderingData.cameraData.camera));
 
                 if (m_LightCookieManager != null)
                 {
-                    m_LightCookieManager.Setup(context, cmd, ref renderingData.lightData);
+                    m_LightCookieManager.Setup(cmd, ref renderingData.lightData);
                 }
                 else
                 {
                     CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.LightCookies, false);
                 }
             }
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
         }
 
         internal void Cleanup()
@@ -519,7 +563,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                     NativeArray<ShaderInput.LightData> additionalLightsData = new NativeArray<ShaderInput.LightData>(additionalLightsCount, Allocator.Temp);
                     for (int i = 0, lightIter = 0; i < lights.Length && lightIter < maxAdditionalLightsCount; ++i)
                     {
-                        VisibleLight light = lights[i];
                         if (lightData.mainLightIndex != i)
                         {
                             ShaderInput.LightData data;
@@ -608,7 +651,19 @@ namespace UnityEngine.Rendering.Universal.Internal
                 }
                 else
                 {
-                    perObjectLightIndexMap[i] -= globalDirectionalLightsCount;
+                    if (lightData.visibleLights[i].lightType == LightType.Directional ||
+                        lightData.visibleLights[i].lightType == LightType.Spot ||
+                        lightData.visibleLights[i].lightType == LightType.Point)
+                    {
+                        // Light type is supported
+                        perObjectLightIndexMap[i] -= globalDirectionalLightsCount;
+                    }
+                    else
+                    {
+                        // Light type is not supported. Skip the light.
+                        perObjectLightIndexMap[i] = -1;
+                    }
+
                     ++additionalLightsCount;
                 }
             }

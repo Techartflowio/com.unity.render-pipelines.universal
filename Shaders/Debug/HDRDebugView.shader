@@ -220,7 +220,7 @@ Shader "Hidden/Universal/HDRDebugView"
             HLSLPROGRAM
                 #pragma vertex Vert
                 #pragma fragment Frag
-                
+
                 half4 Frag(Varyings input) : SV_Target
                 {
                     float4 outCol = 0;

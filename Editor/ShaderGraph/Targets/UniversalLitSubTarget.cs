@@ -143,6 +143,8 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
 
         public override void GetActiveBlocks(ref TargetActiveBlockContext context)
         {
+            context.AddBlock(UniversalBlockFields.VertexDescription.MotionVector, target.additionalMotionVectorMode == AdditionalMotionVectorMode.Custom);
+
             context.AddBlock(BlockFields.SurfaceDescription.Smoothness);
             context.AddBlock(BlockFields.SurfaceDescription.NormalOS, normalDropOffSpace == NormalDropOffSpace.Object);
             context.AddBlock(BlockFields.SurfaceDescription.NormalTS, normalDropOffSpace == NormalDropOffSpace.Tangent);
@@ -351,6 +353,10 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 if (target.castShadows || target.allowMaterialOverride)
                     result.passes.Add(PassVariant(CorePasses.ShadowCaster(target), CorePragmas.Instanced));
 
+                if (target.alwaysRenderMotionVectors)
+                    result.customTags = string.Concat(result.customTags, " ", UniversalTarget.kAlwaysRenderMotionVectorsTag);
+                result.passes.Add(PassVariant(CorePasses.MotionVectors(target), CorePragmas.MotionVectors));
+
                 if (target.mayWriteDepth)
                     result.passes.Add(PassVariant(CorePasses.DepthOnly(target), CorePragmas.Instanced));
 
@@ -493,7 +499,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 return result;
             }
 
-            // Deferred only in SM4.5, MRT not supported in GLES2
+            // Deferred only in SM4.5
             public static PassDescriptor GBuffer(UniversalTarget target, WorkflowMode workflowMode, bool blendModePreserveSpecular)
             {
                 var result = new PassDescriptor
@@ -879,6 +885,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 // Pre-graph
                 { CoreIncludes.DOTSPregraph },
                 { CoreIncludes.WriteRenderLayersPregraph },
+                { CoreIncludes.ProbeVolumePregraph },
                 { CoreIncludes.CorePregraph },
                 { kShadows, IncludeLocation.Pregraph },
                 { CoreIncludes.ShaderGraphPregraph },
@@ -894,6 +901,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 // Pre-graph
                 { CoreIncludes.DOTSPregraph },
                 { CoreIncludes.WriteRenderLayersPregraph },
+                { CoreIncludes.ProbeVolumePregraph },
                 { CoreIncludes.CorePregraph },
                 { kShadows, IncludeLocation.Pregraph },
                 { CoreIncludes.ShaderGraphPregraph },

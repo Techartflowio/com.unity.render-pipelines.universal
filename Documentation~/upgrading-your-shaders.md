@@ -1,14 +1,12 @@
 # Converting your shaders
 
-Shaders written for the Built-in Render Pipeline are not compatible with the URP shaders.
+Shaders written for the Built-in Render Pipeline are not compatible with Universal Render Pipeline (URP) shaders. Unity renders objects with the [default magenta error shader](https://docs.unity3d.com/Manual/shader-error.html) if they use Built-In Render Pipeline shaders.
 
-For an overview of the mapping between built-in shaders and URP shaders, see [Shader mappings](#shader-mappings).
+Use the [Render Pipeline Converter](features/rp-converter.md) to convert any of Unity's built-in Built-In Render Pipeline materials and shaders to a URP material and shader. Refer to [Shader mappings](#shader-mappings) for more information.
 
-Use the [Render Pipeline Converter](features/rp-converter.md) to apply the shader mappings automatically.
+> **Note**: The Render Pipeline Converter makes irreversible changes to the project. Back up your project before the conversion.
 
-**Note**: The Render Pipeline Converter makes irreversible changes to the project. Back up your project before the conversion.
-
-**Tip**: If the preview thumbnails in the Project view are not shown correctly after the conversion, try right-clicking anywhere in the Project view and selecting **Reimport All**.
+If the preview thumbnails in the Project view are not shown correctly after the conversion, try right-clicking anywhere in the Project view and selecting **Reimport All**.
 
 For [SpeedTree](https://docs.unity3d.com/Manual/SpeedTree.html) Shaders, Unity does not re-generate Materials when you re-import them, unless you click the **Generate Materials** or **Apply & Generate Materials** button.
 
@@ -16,11 +14,11 @@ For [SpeedTree](https://docs.unity3d.com/Manual/SpeedTree.html) Shaders, Unity d
 
 ## Custom shaders
 
-You cannot upgrade Custom Unity shaders written for the Built-in Render Pipeline. Instead, custom shaders must be rewritten to work with URP or recreated in [ShaderGraph](https://docs.unity3d.com/Packages/com.unity.shadergraph@14.0/manual/index.html).
+You cannot upgrade Custom Unity shaders written for the Built-in Render Pipeline. Instead, custom shaders must be rewritten to work with URP or recreated in [ShaderGraph](https://docs.unity3d.com/Packages/com.unity.shadergraph@17.0/manual/index.html). For an example of how to rewrite and upgrade a Built-In Render Pipeline custom shader to be compatible with URP, refer to [Upgrade custom shaders for URP compatibility](urp-shaders/birp-urp-custom-shader-upgrade-guide.md).
 
-Any Materials in a Scene that use a custom shader when you upgrade a project to use URP turn pink to indicate the Material no longer works. To fix this, upgrade or change the Material's shader to one that is compatible with URP.
+Any Materials in a scene that use a custom shader when you upgrade a project to use URP turn pink to indicate the Material no longer works. To fix this, upgrade or change the Material's shader to one that is compatible with URP.
 
-**Note**: URP does not support [Surface Shaders](https://docs.unity3d.com/Manual/SL-SurfaceShaders.html).
+> **Note**: URP does not support [Surface Shaders](https://docs.unity3d.com/Manual/SL-SurfaceShaders.html).
 
 <a name="built-in-to-urp-shader-mappings"></a>
 

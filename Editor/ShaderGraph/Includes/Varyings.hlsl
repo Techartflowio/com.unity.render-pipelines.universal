@@ -12,9 +12,8 @@
 
 #if defined(FEATURES_GRAPH_VERTEX)
 #if defined(HAVE_VFX_MODIFICATION)
-VertexDescription BuildVertexDescription(Attributes input, AttributesElement element)
+VertexDescription BuildVertexDescription(Attributes input, AttributesElement element, out GraphProperties properties)
 {
-    GraphProperties properties;
     ZERO_INITIALIZE(GraphProperties, properties);
     // Fetch the vertex graph properties for the particle instance.
     GetElementVertexProperties(element, properties);
@@ -35,7 +34,30 @@ VertexDescription BuildVertexDescription(Attributes input)
 #endif
 #endif
 
-Varyings BuildVaryings(Attributes input)
+#if (SHADERPASS == SHADERPASS_MOTION_VECTORS)
+// We want to gather some internal data from the BuildVaryings call to
+// avoid rereading and recalculating these values again in the ShaderGraph motion vector pass
+struct MotionVectorPassOutput
+{
+    float3 positionOS;
+    float3 positionWS;
+#if defined(FEATURES_GRAPH_VERTEX_MOTION_VECTOR_OUTPUT)
+    float3 motionVector;
+#endif
+#if defined(HAVE_VFX_MODIFICATION)
+    float3 vfxParticlePositionOS;
+    AttributesElement vfxElementAttributes;
+    GraphProperties vfxGraphProperties;
+#endif
+
+};
+#endif
+
+Varyings BuildVaryings(Attributes input
+#if (SHADERPASS == SHADERPASS_MOTION_VECTORS)
+    , inout MotionVectorPassOutput motionVectorOutput
+#endif
+)
 {
     Varyings output = (Varyings)0;
 
@@ -52,18 +74,23 @@ Varyings BuildVaryings(Attributes input)
         return output; // Dead particle.
 
     SetupVFXMatrices(element, output);
+
+    #if (SHADERPASS == SHADERPASS_MOTION_VECTORS)
+        motionVectorOutput.vfxParticlePositionOS = input.positionOS;
+    #endif
+
 #endif
 
     UNITY_TRANSFER_INSTANCE_ID(input, output);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
 #if defined(FEATURES_GRAPH_VERTEX)
-
-#if defined(HAVE_VFX_MODIFICATION)
-    VertexDescription vertexDescription = BuildVertexDescription(input, element);
-#else
-    VertexDescription vertexDescription = BuildVertexDescription(input);
-#endif
+    #if defined(HAVE_VFX_MODIFICATION)
+        GraphProperties properties;
+        VertexDescription vertexDescription = BuildVertexDescription(input, element, properties);
+    #else
+        VertexDescription vertexDescription = BuildVertexDescription(input);
+    #endif
 
     #if defined(CUSTOMINTERPOLATOR_VARYPASSTHROUGH_FUNC)
         CustomInterpolatorPassThroughFunc(output, vertexDescription);
@@ -71,10 +98,10 @@ Varyings BuildVaryings(Attributes input)
 
     // Assign modified vertex attributes
     input.positionOS = vertexDescription.Position;
-    #if defined(VARYINGS_NEED_NORMAL_WS)
+    #if defined(ATTRIBUTES_NEED_NORMAL) && defined(FEATURES_GRAPH_VERTEX_NORMAL_OUTPUT)
         input.normalOS = vertexDescription.Normal;
     #endif //FEATURES_GRAPH_NORMAL
-    #if defined(VARYINGS_NEED_TANGENT_WS)
+    #if defined(ATTRIBUTES_NEED_TANGENT) && defined(FEATURES_GRAPH_VERTEX_TANGENT_OUTPUT)
         input.tangentOS.xyz = vertexDescription.Tangent.xyz;
     #endif //FEATURES GRAPH TANGENT
 #endif //FEATURES_GRAPH_VERTEX
@@ -84,6 +111,18 @@ Varyings BuildVaryings(Attributes input)
 
     // Returns the camera relative position (if enabled)
     float3 positionWS = TransformObjectToWorld(input.positionOS);
+
+#if (SHADERPASS == SHADERPASS_MOTION_VECTORS)
+    motionVectorOutput.positionOS = input.positionOS;
+    motionVectorOutput.positionWS = positionWS;
+    #if defined(FEATURES_GRAPH_VERTEX_MOTION_VECTOR_OUTPUT)
+        motionVectorOutput.motionVector = vertexDescription.MotionVector;
+    #endif
+    #if defined(HAVE_VFX_MODIFICATION)
+        motionVectorOutput.vfxElementAttributes = element;
+        motionVectorOutput.vfxGraphProperties = properties;
+    #endif
+#endif
 
 #ifdef ATTRIBUTES_NEED_NORMAL
     float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
@@ -172,7 +211,7 @@ Varyings BuildVaryings(Attributes input)
 #if defined(DYNAMICLIGHTMAP_ON)
     output.dynamicLightmapUV.xy = input.uv2.xy * unity_DynamicLightmapST.xy + unity_DynamicLightmapST.zw;
 #endif
-    OUTPUT_SH(normalWS, output.sh);
+    OUTPUT_SH4(vertexInput.positionWS, normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.sh);
 #endif
 
 #ifdef VARYINGS_NEED_FOG_AND_VERTEX_LIGHT
@@ -188,6 +227,9 @@ Varyings BuildVaryings(Attributes input)
     output.shadowCoord = GetShadowCoord(vertexInput);
 #endif
 
+#if defined(VARYINGS_NEED_SIX_WAY_DIFFUSE_GI_DATA)
+    GatherDiffuseGIData(vertexInput.positionWS, normalWS.xyz, tangentWS.xyz, output.diffuseGIData0, output.diffuseGIData1, output.diffuseGIData2);
+#endif
     return output;
 }
 

@@ -35,7 +35,8 @@ namespace ShaderStrippingAndPrefiltering
                 | ShaderFeatures.LightCookies
                 | ShaderFeatures.LODCrossFade
                 | ShaderFeatures.AutoSHMode
-                | ShaderFeatures.DataDrivenLensFlare;
+                | ShaderFeatures.DataDrivenLensFlare
+                | ShaderFeatures.ScreenSpaceLensFlare;
 
             internal RendererRequirements defaultRendererRequirements = new()
             {
@@ -146,6 +147,7 @@ namespace ShaderStrippingAndPrefiltering
                 urpAsset.supportsMainLightShadows = false;
                 urpAsset.additionalLightsRenderingMode = LightRenderingMode.Disabled;
                 urpAsset.supportsAdditionalLightShadows = false;
+                urpAsset.lightProbeSystem = LightProbeSystem.LegacyLightProbes;
                 urpAsset.reflectionProbeBlending = false;
                 urpAsset.reflectionProbeBoxProjection = false;
                 urpAsset.supportsSoftShadows = false;
@@ -297,6 +299,33 @@ namespace ShaderStrippingAndPrefiltering
             helper.urpAsset.supportsSoftShadows = true;
             expected = helper.defaultURPAssetFeatures | ShaderFeatures.AdditionalLightShadows | ShaderFeatures.AdditionalLightsPixel | ShaderFeatures.SoftShadows;
             actual = helper.GetSupportedShaderFeaturesFromAsset();
+            helper.AssertShaderFeaturesAndReset(expected, actual);
+
+            // Clean up
+            helper.Cleanup();
+        }
+
+        [Test]
+        public static void TestGetSupportedShaderFeaturesFromAsset_ProbeVolumes()
+        {
+            TestHelper helper = new ();
+            ShaderFeatures actual;
+            ShaderFeatures expected;
+
+            helper.urpAsset.lightProbeSystem = LightProbeSystem.LegacyLightProbes;
+            actual = helper.GetSupportedShaderFeaturesFromAsset();
+            expected = helper.defaultURPAssetFeatures;
+            helper.AssertShaderFeaturesAndReset(expected, actual);
+
+            helper.urpAsset.lightProbeSystem = LightProbeSystem.ProbeVolumes;
+            actual = helper.GetSupportedShaderFeaturesFromAsset();
+            expected = helper.defaultURPAssetFeatures | ShaderFeatures.ProbeVolumeL1;
+            helper.AssertShaderFeaturesAndReset(expected, actual);
+
+            helper.urpAsset.lightProbeSystem = LightProbeSystem.ProbeVolumes;
+            helper.urpAsset.probeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL2;
+            actual = helper.GetSupportedShaderFeaturesFromAsset();
+            expected = helper.defaultURPAssetFeatures | ShaderFeatures.ProbeVolumeL2;
             helper.AssertShaderFeaturesAndReset(expected, actual);
 
             // Clean up
@@ -702,6 +731,7 @@ namespace ShaderStrippingAndPrefiltering
                                               | ShaderFeatures.DBufferMRT1
                                               | ShaderFeatures.DBufferMRT2
                                               | ShaderFeatures.DBufferMRT3
+                                              | ShaderFeatures.DecalScreenSpace
                                               | ShaderFeatures.DecalNormalBlendLow
                                               | ShaderFeatures.DecalNormalBlendMedium
                                               | ShaderFeatures.DecalNormalBlendHigh
@@ -926,6 +956,7 @@ namespace ShaderStrippingAndPrefiltering
                                               | ShaderFeatures.DBufferMRT1
                                               | ShaderFeatures.DBufferMRT2
                                               | ShaderFeatures.DBufferMRT3
+                                              | ShaderFeatures.DecalScreenSpace
                                               | ShaderFeatures.DecalNormalBlendLow
                                               | ShaderFeatures.DecalNormalBlendMedium
                                               | ShaderFeatures.DecalNormalBlendHigh

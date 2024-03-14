@@ -14,6 +14,7 @@ namespace UnityEngine.Rendering.Universal
     /// Class <c>ScriptableRendererData</c> contains resources for a <c>ScriptableRenderer</c>.
     /// <seealso cref="ScriptableRenderer"/>
     /// </summary>
+    [Icon("UnityEngine/Rendering/RenderPipelineAsset Icon")]
     public abstract class ScriptableRendererData : ScriptableObject
     {
         internal bool isInvalidated { get; set; }
@@ -35,12 +36,70 @@ namespace UnityEngine.Rendering.Universal
             /// </summary>
             [Reload("Shaders/Debug/HDRDebugView.shader")]
             public Shader hdrDebugViewPS;
+
+            /// <summary>
+            /// Debug shader used to output world position and world normal for the pixel under the cursor.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeVolumeSamplingDebugPositionNormal.compute")]
+            public ComputeShader probeVolumeSamplingDebugComputeShader;
         }
 
         /// <summary>
         /// Container for shader resources used by Rendering Debugger.
         /// </summary>
         public DebugShaderResources debugShaders;
+
+        /// <summary>
+        /// Class contains references to shader resources used by APV.
+        /// </summary>
+        [Serializable, ReloadGroup]
+        public sealed class ProbeVolumeResources
+        {
+            /// <summary>
+            /// Debug shader used to render probes in the volume.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeVolumeDebug.shader")]
+            public Shader probeVolumeDebugShader;
+
+            /// <summary>
+            /// Debug shader used to display fragmentation of the GPU memory.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeVolumeFragmentationDebug.shader")]
+            public Shader probeVolumeFragmentationDebugShader;
+
+            /// <summary>
+            /// Debug shader used to draw the offset direction used for a probe.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeVolumeOffsetDebug.shader")]
+            public Shader probeVolumeOffsetDebugShader;
+
+            /// <summary>
+            /// Debug shader used to draw the sampling weights of the probe volume.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeVolumeSamplingDebug.shader")]
+            public Shader probeVolumeSamplingDebugShader;
+
+            /// <summary>
+            /// Debug mesh used to draw the sampling weights of the probe volume.
+            /// </summary>
+            [Reload("Shaders/Debug/ProbeSamplingDebugMesh.fbx")]
+            public Mesh probeSamplingDebugMesh;
+
+            /// <summary>
+            /// Texture with the numbers dor sampling weights.
+            /// </summary>
+            [Reload("Shaders/Debug/NumbersDisplayTex.png")]
+            public Texture2D probeSamplingDebugTexture;
+
+            // Disable this since it requires compute
+            //[Reload("Shaders/ProbeVolumeBlendStates.compute")]
+            //public ComputeShader probeVolumeBlendStatesCS;
+        }
+
+        /// <summary>
+        /// Probe volume resources used by URP
+        /// </summary>
+        public ProbeVolumeResources probeVolumeResources;
 
         /// <summary>
         /// Creates the instance of the ScriptableRenderer.
@@ -111,9 +170,10 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Returns true if contains renderer feature with specified type.
         /// </summary>
+        /// <param name="rendererFeature">RenderFeature output parameter.</param>
         /// <typeparam name="T">Renderer Feature type.</typeparam>
         /// <returns></returns>
-        internal bool TryGetRendererFeature<T>(out T rendererFeature) where T : ScriptableRendererFeature
+        public bool TryGetRendererFeature<T>(out T rendererFeature) where T : ScriptableRendererFeature
         {
             foreach (var target in rendererFeatures)
             {

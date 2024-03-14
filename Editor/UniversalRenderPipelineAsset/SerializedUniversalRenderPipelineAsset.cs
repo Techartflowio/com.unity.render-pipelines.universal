@@ -30,6 +30,11 @@ namespace UnityEditor.Rendering.Universal
 
         public SerializedProperty shEvalModeProp { get; }
 
+        internal SerializedProperty lightProbeSystem;
+        internal SerializedProperty probeVolumeTextureSize;
+        internal SerializedProperty supportProbeVolumeStreaming;
+        internal SerializedProperty probeVolumeSHBands;
+
         public SerializedProperty additionalLightsRenderingModeProp { get; }
         public SerializedProperty additionalLightsPerObjectLimitProp { get; }
         public SerializedProperty additionalLightShadowsSupportedProp { get; }
@@ -66,11 +71,13 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty enableRenderGraph { get; }
 
         public SerializedProperty volumeFrameworkUpdateModeProp { get; }
+        public SerializedProperty volumeProfileProp { get; }
 
         public SerializedProperty colorGradingMode { get; }
         public SerializedProperty colorGradingLutSize { get; }
         public SerializedProperty useFastSRGBLinearConversion { get; }
         public SerializedProperty supportDataDrivenLensFlare { get; }
+        public SerializedProperty supportScreenSpaceLensFlare { get; }
 
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
         public SerializedProperty useAdaptivePerformance { get; }
@@ -101,6 +108,11 @@ namespace UnityEditor.Rendering.Universal
             fsrSharpness = serializedObject.FindProperty("m_FsrSharpness");
 
             shEvalModeProp = serializedObject.FindProperty("m_ShEvalMode");
+
+            lightProbeSystem = serializedObject.FindProperty("m_LightProbeSystem");
+            probeVolumeTextureSize = serializedObject.FindProperty("m_ProbeVolumeMemoryBudget");
+            supportProbeVolumeStreaming = serializedObject.FindProperty("m_SupportProbeVolumeStreaming");
+            probeVolumeSHBands = serializedObject.FindProperty("m_ProbeVolumeSHBands");
 
             mainLightRenderingModeProp = serializedObject.FindProperty("m_MainLightRenderingMode");
             mainLightShadowsSupportedProp = serializedObject.FindProperty("m_MainLightShadowsSupported");
@@ -143,6 +155,7 @@ namespace UnityEditor.Rendering.Universal
             enableRenderGraph = serializedObject.FindProperty("m_EnableRenderGraph");
 
             volumeFrameworkUpdateModeProp = serializedObject.FindProperty("m_VolumeFrameworkUpdateMode");
+            volumeProfileProp = serializedObject.FindProperty("m_VolumeProfile");
 
             storeActionsOptimizationProperty = serializedObject.FindProperty("m_StoreActionsOptimization");
 
@@ -151,6 +164,7 @@ namespace UnityEditor.Rendering.Universal
 
             useFastSRGBLinearConversion = serializedObject.FindProperty("m_UseFastSRGBLinearConversion");
             supportDataDrivenLensFlare = serializedObject.FindProperty("m_SupportDataDrivenLensFlare");
+            supportScreenSpaceLensFlare = serializedObject.FindProperty("m_SupportScreenSpaceLensFlare");
 
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
             useAdaptivePerformance = serializedObject.FindProperty("m_UseAdaptivePerformance");

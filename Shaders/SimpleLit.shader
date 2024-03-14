@@ -33,6 +33,7 @@ Shader "Universal Render Pipeline/Simple Lit"
         [HideInInspector] _ZWrite("__zw", Float) = 1.0
         [HideInInspector] _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
+        [HideInInspector] _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
 
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         // Editmode props
@@ -112,6 +113,7 @@ Shader "Universal Render Pipeline/Simple Lit"
             #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
             #pragma multi_compile_fragment _ _LIGHT_COOKIES
             #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
             // -------------------------------------
@@ -231,6 +233,7 @@ Shader "Universal Render Pipeline/Simple Lit"
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fragment _ _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
             // -------------------------------------
@@ -329,7 +332,7 @@ Shader "Universal Render Pipeline/Simple Lit"
             // -------------------------------------
             // Material Keywords
             #pragma shader_feature_local _NORMALMAP
-            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local _ALPHATEST_ON
             #pragma shader_feature_local_fragment _GLOSSINESS_FROM_BASE_ALPHA
 
             // -------------------------------------
@@ -413,6 +416,22 @@ Shader "Universal Render Pipeline/Simple Lit"
             // Includes
             #include "Packages/com.unity.render-pipelines.universal/Shaders/SimpleLitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Universal2D.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "MotionVectors"
+            Tags { "LightMode" = "MotionVectors" }
+            ColorMask RG
+
+            HLSLPROGRAM
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
+            #pragma shader_feature_local_vertex _ADD_PRECOMPUTED_VELOCITY
+
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/SimpleLitInput.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ObjectMotionVectors.hlsl"
             ENDHLSL
         }
     }

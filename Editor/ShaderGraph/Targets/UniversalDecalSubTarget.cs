@@ -805,7 +805,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             public static PragmaCollection GBuffer = new PragmaCollection
             {
                 { Pragma.Target(ShaderModel.Target45) }, // MRT4
-                { Pragma.ExcludeRenderers(new[] { Platform.GLES, Platform.GLES3, Platform.GLCore }) },
+                { Pragma.ExcludeRenderers(new[] { Platform.GLES3, Platform.GLCore }) },
                 { Pragma.Vertex("Vert") },
                 { Pragma.Fragment("Frag") },
                 { Pragma.MultiCompileInstancing },
@@ -816,6 +816,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             public static PragmaCollection MultipleRenderTargets = new PragmaCollection
             {
                 { Pragma.Target(ShaderModel.Target45) }, // MRT4
+                { Pragma.ExcludeRenderers(new[] { Platform.GLES3, Platform.GLCore }) },
                 { Pragma.Vertex("Vert") },
                 { Pragma.Fragment("Frag") },
                 { Pragma.MultiCompileInstancing },
@@ -995,6 +996,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.ForwardPlus },
                 { Descriptors.DecalsNormalBlend },
                 { CoreKeywordDescriptors.LODFadeCrossFade, new FieldCondition(Fields.LodCrossFade, true) },
+                { CoreKeywordDescriptors.DebugDisplay },
             };
 
             public static readonly KeywordCollection ScreenSpaceMesh = new KeywordCollection
@@ -1011,6 +1013,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.AdditionalLightShadows },
                 { CoreKeywordDescriptors.ShadowsSoft },
                 { CoreKeywordDescriptors.ForwardPlus },
+                { CoreKeywordDescriptors.DebugDisplay },
                 { Descriptors.DecalsNormalBlend },
                 { Descriptors.DecalLayers },
             };
@@ -1074,6 +1077,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreIncludes.DOTSPregraph },
                 { CoreIncludes.CorePregraph },
                 { CoreIncludes.ShaderGraphPregraph },
+                { CoreIncludes.ProbeVolumePregraph },
                 { DecalPregraph },
                 { kDBuffer, IncludeLocation.Pregraph },
                 { kLODCrossFade, IncludeLocation.Pregraph, new FieldCondition(Fields.LodCrossFade, true) },
@@ -1088,6 +1092,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreIncludes.DOTSPregraph },
                 { CoreIncludes.CorePregraph },
                 { CoreIncludes.ShaderGraphPregraph },
+                { CoreIncludes.ProbeVolumePregraph },
                 { DecalPregraph },
                 { kLODCrossFade, IncludeLocation.Pregraph, new FieldCondition(Fields.LodCrossFade, true) },
 
@@ -1101,6 +1106,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreIncludes.DOTSPregraph },
                 { CoreIncludes.CorePregraph },
                 { CoreIncludes.ShaderGraphPregraph },
+                { CoreIncludes.ProbeVolumePregraph },
                 { kGBuffer, IncludeLocation.Pregraph },
                 { DecalPregraph },
                 { kLODCrossFade, IncludeLocation.Pregraph, new FieldCondition(Fields.LodCrossFade, true) },

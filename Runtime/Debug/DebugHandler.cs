@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -70,8 +72,13 @@ namespace UnityEngine.Rendering.Universal
 
         #region IDebugDisplaySettingsQuery
 
+        /// <inheritdoc/>
         public bool AreAnySettingsActive => m_DebugDisplaySettings.AreAnySettingsActive;
+
+        /// <inheritdoc/>
         public bool IsPostProcessingAllowed => m_DebugDisplaySettings.IsPostProcessingAllowed;
+
+        /// <inheritdoc/>
         public bool IsLightingActive => m_DebugDisplaySettings.IsLightingActive;
 
         // These modes would require putting custom data into gbuffer, so instead we just disable deferred mode.
@@ -83,6 +90,7 @@ namespace UnityEngine.Rendering.Universal
             m_DebugDisplaySettings.materialSettings.vertexAttributeDebugMode != DebugVertexAttributeMode.None ||
             m_DebugDisplaySettings.materialSettings.materialValidationMode != DebugMaterialValidationMode.None;
 
+        /// <inheritdoc/>
         public bool TryGetScreenClearColor(ref Color color)
         {
             return m_DebugDisplaySettings.TryGetScreenClearColor(ref color);
@@ -171,21 +179,21 @@ namespace UnityEngine.Rendering.Universal
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
             descriptor.useDynamicScale = true;
-            descriptor.depthBufferBits = 0;
+            descriptor.depthStencilFormat = GraphicsFormat.None;
         }
         
-        internal static void ConfigureDepthDescriptorForDebugScreen(ref RenderTextureDescriptor descriptor, int depthBufferBits, int cameraWidth, int cameraHeight)
+        internal static void ConfigureDepthDescriptorForDebugScreen(ref RenderTextureDescriptor descriptor, GraphicsFormat depthStencilFormat, int cameraWidth, int cameraHeight)
         {
             descriptor.width = cameraWidth;
             descriptor.height = cameraHeight;
             descriptor.useMipMap = false;
             descriptor.autoGenerateMips = false;
             descriptor.useDynamicScale = true;
-            descriptor.depthBufferBits = depthBufferBits;
+            descriptor.depthStencilFormat = depthStencilFormat;
         }
 
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
-        internal void SetupShaderProperties(CommandBuffer cmd, int passIndex = 0)
+        internal void SetupShaderProperties(RasterCommandBuffer cmd, int passIndex = 0)
         {
             if (LightingSettings.lightingDebugMode == DebugLightingMode.ShadowCascades)
             {
@@ -304,10 +312,10 @@ namespace UnityEngine.Rendering.Universal
         }
 
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
-        internal void Setup(ScriptableRenderContext context, ref RenderingData renderingData)
+        internal void Setup(ref RenderingData renderingData)
         {
             var cmd = renderingData.commandBuffer;
-            var cameraData = renderingData.cameraData;
+            ref var cameraData = ref renderingData.cameraData;
 
             if (IsActiveForCamera(ref cameraData))
             {
@@ -339,144 +347,144 @@ namespace UnityEngine.Rendering.Universal
             {
                 cmd.DisableShaderKeyword(ShaderKeywordStrings.DEBUG_DISPLAY);
             }
-
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
         }
 
-        #region DebugRenderPasses
-
-        private class DebugRenderPassEnumerable : IEnumerable<DebugRenderSetup>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal void Render(RenderGraph renderGraph, ref RenderingData renderingData, TextureHandle srcColor, TextureHandle overlayTexture, TextureHandle dstColor)
         {
-            private class Enumerator : IEnumerator<DebugRenderSetup>
+            ref var cameraData = ref renderingData.cameraData;
+            if (IsActiveForCamera(ref cameraData) && HDRDebugViewIsActive(ref cameraData))
             {
-                private readonly DebugHandler m_DebugHandler;
-                private readonly ScriptableRenderContext m_Context;
-                private readonly CommandBuffer m_CommandBuffer;
-                readonly FilteringSettings m_FilteringSettings;
-                private readonly int m_NumIterations;
-
-                private int m_Index;
-
-                public DebugRenderSetup Current { get; private set; }
-                object IEnumerator.Current => Current;
-
-                public Enumerator(DebugHandler debugHandler,
-                    ScriptableRenderContext context,
-                    CommandBuffer commandBuffer,
-                    FilteringSettings filteringSettings)
-                {
-                    DebugSceneOverrideMode sceneOverrideMode = debugHandler.DebugDisplaySettings.renderingSettings.sceneOverrideMode;
-
-                    m_DebugHandler = debugHandler;
-                    m_Context = context;
-                    m_CommandBuffer = commandBuffer;
-                    m_FilteringSettings = filteringSettings;
-                    m_NumIterations = ((sceneOverrideMode == DebugSceneOverrideMode.SolidWireframe) ||
-                        (sceneOverrideMode == DebugSceneOverrideMode.ShadedWireframe))
-                        ? 2
-                        : 1;
-
-                    m_Index = -1;
-                }
-
-                #region IEnumerator<DebugRenderSetup>
-
-                public bool MoveNext()
-                {
-                    Current?.Dispose();
-
-                    if (++m_Index >= m_NumIterations)
-                    {
-                        return false;
-                    }
-                    else
-                    {
-                        Current = new DebugRenderSetup(m_DebugHandler, m_Context, m_CommandBuffer, m_Index, m_FilteringSettings);
-                        return true;
-                    }
-                }
-
-                public void Reset()
-                {
-                    if (Current != null)
-                    {
-                        Current.Dispose();
-                        Current = null;
-                    }
-
-                    m_Index = -1;
-                }
-
-                public void Dispose()
-                {
-                    Current?.Dispose();
-                }
-
-                #endregion
+                m_HDRDebugViewPass.RenderHDRDebug(renderGraph, ref renderingData, srcColor, overlayTexture, dstColor, LightingSettings.hdrDebugMode);
             }
-
-            private readonly DebugHandler m_DebugHandler;
-            private readonly ScriptableRenderContext m_Context;
-            private readonly CommandBuffer m_CommandBuffer;
-            readonly FilteringSettings m_FilteringSettings;
-
-            public DebugRenderPassEnumerable(DebugHandler debugHandler,
-                ScriptableRenderContext context,
-                CommandBuffer commandBuffer,
-                FilteringSettings filteringSettings)
-            {
-                m_DebugHandler = debugHandler;
-                m_Context = context;
-                m_CommandBuffer = commandBuffer;
-                m_FilteringSettings = filteringSettings;
-            }
-
-            #region IEnumerable<DebugRenderSetup>
-
-            public IEnumerator<DebugRenderSetup> GetEnumerator()
-            {
-                return new Enumerator(m_DebugHandler, m_Context, m_CommandBuffer, m_FilteringSettings);
-            }
-
-            IEnumerator IEnumerable.GetEnumerator()
-            {
-                return GetEnumerator();
-            }
-
-            #endregion
         }
 
-        internal IEnumerable<DebugRenderSetup> CreateDebugRenderSetupEnumerable(ScriptableRenderContext context,
-            CommandBuffer commandBuffer, FilteringSettings filteringSettings)
+        #region DebugRendererLists
+
+        internal DebugRendererLists CreateRendererListsWithDebugRenderState(
+             ScriptableRenderContext context,
+             ref RenderingData renderingData,
+             ref DrawingSettings drawingSettings,
+             ref FilteringSettings filteringSettings,
+             ref RenderStateBlock renderStateBlock)
         {
-            return new DebugRenderPassEnumerable(this, context, commandBuffer, filteringSettings);
+            DebugRendererLists debug = new DebugRendererLists(this, filteringSettings);
+            debug.CreateRendererListsWithDebugRenderState(context, ref renderingData, ref drawingSettings, ref filteringSettings, ref renderStateBlock);
+            return debug;
         }
 
-        internal delegate void DrawFunction(
-            ScriptableRenderContext context,
+        internal DebugRendererLists CreateRendererListsWithDebugRenderState(
+            RenderGraph renderGraph,
             ref RenderingData renderingData,
             ref DrawingSettings drawingSettings,
             ref FilteringSettings filteringSettings,
-            ref RenderStateBlock renderStateBlock);
-
-        internal void DrawWithDebugRenderState(
-            ScriptableRenderContext context,
-            CommandBuffer cmd,
-            ref RenderingData renderingData,
-            ref DrawingSettings drawingSettings,
-            ref FilteringSettings filteringSettings,
-            ref RenderStateBlock renderStateBlock,
-            DrawFunction func)
+            ref RenderStateBlock renderStateBlock)
         {
-            foreach (DebugRenderSetup debugRenderSetup in CreateDebugRenderSetupEnumerable(context, cmd, filteringSettings))
+            DebugRendererLists debug = new DebugRendererLists(this, filteringSettings);
+            debug.CreateRendererListsWithDebugRenderState(renderGraph, ref renderingData, ref drawingSettings, ref filteringSettings, ref renderStateBlock);
+            return debug;
+        }
+        #endregion
+    }
+
+    internal class DebugRendererLists
+    {
+        private readonly DebugHandler m_DebugHandler;
+        readonly FilteringSettings m_FilteringSettings;
+        List<DebugRenderSetup> m_DebugRenderSetups = new List<DebugRenderSetup>(2);
+        List<RendererList> m_ActiveDebugRendererList = new List<RendererList>(2);
+        List<RendererListHandle> m_ActiveDebugRendererListHdl = new List<RendererListHandle>(2);
+
+        public DebugRendererLists(DebugHandler debugHandler,
+            FilteringSettings filteringSettings)
+        {
+            m_DebugHandler = debugHandler;
+            m_FilteringSettings = filteringSettings;
+        }
+
+        private void CreateDebugRenderSetups(FilteringSettings filteringSettings)
+        {
+            var sceneOverrideMode = m_DebugHandler.DebugDisplaySettings.renderingSettings.sceneOverrideMode;
+            var numIterations = ((sceneOverrideMode == DebugSceneOverrideMode.SolidWireframe) || (sceneOverrideMode == DebugSceneOverrideMode.ShadedWireframe)) ? 2 : 1;
+            for (var i = 0; i < numIterations; i++)
+                m_DebugRenderSetups.Add(new DebugRenderSetup(m_DebugHandler, i, filteringSettings));
+        }
+
+        void DisposeDebugRenderLists()
+        {
+            foreach (var debugRenderSetup in m_DebugRenderSetups)
+            {
+                debugRenderSetup.Dispose();
+            }
+            m_DebugRenderSetups.Clear();
+            m_ActiveDebugRendererList.Clear();
+            m_ActiveDebugRendererListHdl.Clear();
+        }
+
+        internal void CreateRendererListsWithDebugRenderState(
+             ScriptableRenderContext context,
+             ref RenderingData renderingData,
+             ref DrawingSettings drawingSettings,
+             ref FilteringSettings filteringSettings,
+             ref RenderStateBlock renderStateBlock)
+        {
+            CreateDebugRenderSetups(filteringSettings);
+            foreach (DebugRenderSetup debugRenderSetup in m_DebugRenderSetups)
             {
                 DrawingSettings debugDrawingSettings = debugRenderSetup.CreateDrawingSettings(drawingSettings);
                 RenderStateBlock debugRenderStateBlock = debugRenderSetup.GetRenderStateBlock(renderStateBlock);
-                func(context, ref renderingData, ref debugDrawingSettings, ref filteringSettings, ref debugRenderStateBlock);
+                RendererList rendererList = new RendererList();
+                RenderingUtils.CreateRendererListWithRenderStateBlock(context, renderingData, debugDrawingSettings, filteringSettings, debugRenderStateBlock, ref rendererList);
+                m_ActiveDebugRendererList.Add((rendererList));
             }
         }
 
-        #endregion
+        internal void CreateRendererListsWithDebugRenderState(
+            RenderGraph renderGraph,
+            ref RenderingData renderingData,
+            ref DrawingSettings drawingSettings,
+            ref FilteringSettings filteringSettings,
+            ref RenderStateBlock renderStateBlock)
+        {
+            CreateDebugRenderSetups(filteringSettings);
+            foreach (DebugRenderSetup debugRenderSetup in m_DebugRenderSetups)
+            {
+                DrawingSettings debugDrawingSettings = debugRenderSetup.CreateDrawingSettings(drawingSettings);
+                RenderStateBlock debugRenderStateBlock = debugRenderSetup.GetRenderStateBlock(renderStateBlock);
+                RendererListHandle rendererListHdl = new RendererListHandle();
+                RenderingUtils.CreateRendererListWithRenderStateBlock(renderGraph, renderingData, debugDrawingSettings, filteringSettings, debugRenderStateBlock, ref rendererListHdl);
+                m_ActiveDebugRendererListHdl.Add((rendererListHdl));
+            }
+        }
+
+        internal void PrepareRendererListForRasterPass(IRasterRenderGraphBuilder builder)
+        {
+            foreach (RendererListHandle rendererListHdl in m_ActiveDebugRendererListHdl)
+            {
+                builder.UseRendererList(rendererListHdl);
+            }
+        }
+
+        internal void DrawWithRendererList(RasterCommandBuffer cmd)
+        {
+            foreach (DebugRenderSetup debugRenderSetup in m_DebugRenderSetups)
+            {
+                debugRenderSetup.Begin(cmd);
+                RendererList rendererList = new RendererList();
+                if (m_ActiveDebugRendererList.Count > 0)
+                {
+                    rendererList = m_ActiveDebugRendererList[debugRenderSetup.GetIndex()];
+                }
+                else if(m_ActiveDebugRendererListHdl.Count > 0)
+                {
+                    rendererList = m_ActiveDebugRendererListHdl[debugRenderSetup.GetIndex()];
+                }
+
+                debugRenderSetup.DrawWithRendererList(cmd, ref rendererList);
+                debugRenderSetup.End(cmd);
+            }
+
+            DisposeDebugRenderLists();
+        }
     }
 }

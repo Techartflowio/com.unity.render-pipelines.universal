@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using System.Diagnostics;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -35,7 +37,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Returns a mesh that you can use with <see cref="CommandBuffer.DrawMesh(Mesh, Matrix4x4, Material)"/> to render full-screen effects.
         /// </summary>
-        [Obsolete("Use Blitter.BlitCameraTexture instead of CommandBuffer.DrawMesh(fullscreenMesh, ...)")]
+        [Obsolete("Use Blitter.BlitCameraTexture instead of CommandBuffer.DrawMesh(fullscreenMesh, ...)")]  // TODO OBSOLETE: need to fix the URP test failures when bumping
         public static Mesh fullscreenMesh
         {
             get
@@ -89,8 +91,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal static bool SupportsLightLayers(GraphicsDeviceType type)
         {
-            // GLES2 does not support bitwise operations.
-            return type != GraphicsDeviceType.OpenGLES2;
+            return true;
         }
 
         static Material s_ErrorMaterial;
@@ -123,7 +124,8 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="viewMatrix">View matrix to be set.</param>
         /// <param name="projectionMatrix">Projection matrix to be set.</param>
         /// <param name="setInverseMatrices">Set this to true if you also need to set inverse camera matrices.</param>
-        public static void SetViewAndProjectionMatrices(CommandBuffer cmd, Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, bool setInverseMatrices)
+        public static void SetViewAndProjectionMatrices(CommandBuffer cmd, Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, bool setInverseMatrices) { SetViewAndProjectionMatrices(CommandBufferHelpers.GetRasterCommandBuffer(cmd), viewMatrix, projectionMatrix, setInverseMatrices); }
+        internal static void SetViewAndProjectionMatrices(RasterCommandBuffer cmd, Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, bool setInverseMatrices)
         {
             Matrix4x4 viewAndProjectionMatrix = projectionMatrix * viewMatrix;
             cmd.SetGlobalMatrix(ShaderPropertyId.viewMatrix, viewMatrix);
@@ -141,7 +143,20 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal static void SetScaleBiasRt(CommandBuffer cmd, in RenderingData renderingData)
+        internal static void SetScaleBiasRt(RasterCommandBuffer cmd, in RenderingData renderingData, RTHandle rTHandle)
+        {
+            // SetRenderTarget has logic to flip projection matrix when rendering to render texture. Flip the uv to account for that case.
+            CameraData cameraData = renderingData.cameraData;
+            bool isCameraColorFinalTarget = (cameraData.cameraType == CameraType.Game && rTHandle.nameID == BuiltinRenderTextureType.CameraTarget && cameraData.camera.targetTexture == null);
+            bool yflip = !isCameraColorFinalTarget;
+            float flipSign = yflip ? -1.0f : 1.0f;
+            Vector4 scaleBiasRt = (flipSign < 0.0f)
+                ? new Vector4(flipSign, 1.0f, -1.0f, 1.0f)
+                : new Vector4(flipSign, 0.0f, 1.0f, 1.0f);
+            cmd.SetGlobalVector(Shader.PropertyToID("_ScaleBiasRt"), scaleBiasRt);
+        }
+
+        internal static void SetScaleBiasRt(RasterCommandBuffer cmd, in RenderingData renderingData)
         {
             var renderer = renderingData.cameraData.renderer;
             // SetRenderTarget has logic to flip projection matrix when rendering to render texture. Flip the uv to account for that case.
@@ -240,14 +255,8 @@ namespace UnityEngine.Rendering.Universal
         // This is used to render materials that contain built-in shader passes not compatible with URP.
         // It will render those legacy passes with error/pink shader.
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
-        internal static void RenderObjectsWithError(ScriptableRenderContext context, ref CullingResults cullResults, Camera camera, FilteringSettings filterSettings, SortingCriteria sortFlags)
+        internal static void CreateRendererParamsObjectsWithError(ref CullingResults cullResults, Camera camera, FilteringSettings filterSettings, SortingCriteria sortFlags, ref RendererListParams param)
         {
-            // TODO: When importing project, AssetPreviewUpdater::CreatePreviewForAsset will be called multiple times.
-            // This might be in a point that some resources required for the pipeline are not finished importing yet.
-            // Proper fix is to add a fence on asset import.
-            if (errorMaterial == null)
-                return;
-
             SortingSettings sortingSettings = new SortingSettings(camera) { criteria = sortFlags };
             DrawingSettings errorSettings = new DrawingSettings(m_LegacyShaderPassNames[0], sortingSettings)
             {
@@ -258,17 +267,117 @@ namespace UnityEngine.Rendering.Universal
             for (int i = 1; i < m_LegacyShaderPassNames.Count; ++i)
                 errorSettings.SetShaderPassName(i, m_LegacyShaderPassNames[i]);
 
-            context.DrawRenderers(cullResults, ref errorSettings, ref filterSettings);
+            param = new RendererListParams(cullResults, errorSettings, filterSettings);
         }
 
-        // Caches render texture format support. SystemInfo.SupportsRenderTextureFormat and IsFormatSupported allocate memory due to boxing.
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal static void CreateRendererListObjectsWithError(ScriptableRenderContext context, ref CullingResults cullResults, Camera camera, FilteringSettings filterSettings, SortingCriteria sortFlags, ref RendererList rl)
+        {
+            // TODO: When importing project, AssetPreviewUpdater::CreatePreviewForAsset will be called multiple times.
+            // This might be in a point that some resources required for the pipeline are not finished importing yet.
+            // Proper fix is to add a fence on asset import.
+            if (errorMaterial == null)
+            {
+                rl = RendererList.nullRendererList;
+                return;
+            }
+
+            RendererListParams param = new RendererListParams();
+            CreateRendererParamsObjectsWithError(ref cullResults, camera, filterSettings, sortFlags, ref param);
+            rl = context.CreateRendererList(ref param);
+        }
+
+        // This is used to render materials that contain built-in shader passes not compatible with URP.
+        // It will render those legacy passes with error/pink shader.
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal static void CreateRendererListObjectsWithError(RenderGraph renderGraph, ref CullingResults cullResults, Camera camera, FilteringSettings filterSettings, SortingCriteria sortFlags, ref RendererListHandle rl)
+        {
+            // TODO: When importing project, AssetPreviewUpdater::CreatePreviewForAsset will be called multiple times.
+            // This might be in a point that some resources required for the pipeline are not finished importing yet.
+            // Proper fix is to add a fence on asset import.
+            if (errorMaterial == null)
+            {
+                rl = new RendererListHandle();
+                return;
+            }
+
+            RendererListParams param = new RendererListParams();
+            CreateRendererParamsObjectsWithError(ref cullResults, camera, filterSettings, sortFlags, ref param);
+            rl = renderGraph.CreateRendererList(param);
+        }
+
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal static void DrawRendererListObjectsWithError(RasterCommandBuffer cmd, ref RendererList rl)
+        {
+            cmd.DrawRendererList(rl);
+        }
+
+        // Create a RendererList using a RenderStateBlock override is quite common so we have this optimized utility function for it
+        internal static void CreateRendererListWithRenderStateBlock(ScriptableRenderContext context, RenderingData data, DrawingSettings ds, FilteringSettings fs, RenderStateBlock rsb, ref RendererList rl)
+        {
+            RendererListParams param = new RendererListParams();
+            unsafe
+            {
+                // Taking references to stack variables in the current function does not require any pinning (as long as you stay within the scope)
+                // so we can safely alias it as a native array
+                RenderStateBlock* rsbPtr = &rsb;
+                var stateBlocks = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<RenderStateBlock>(rsbPtr, 1, Allocator.None);
+
+                var shaderTag = ShaderTagId.none;
+                var tagValues = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<ShaderTagId>(&shaderTag, 1, Allocator.None);
+
+                // Inside CreateRendererList (below), we pass the NativeArrays to C++ by calling GetUnsafeReadOnlyPtr
+                // This will check read access but NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray does not set up the SafetyHandle (by design) so create/add it here
+                // NOTE: we explicitly share the handle
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                var safetyHandle = AtomicSafetyHandle.Create();
+                AtomicSafetyHandle.SetAllowReadOrWriteAccess(safetyHandle, true);
+
+                NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref stateBlocks, safetyHandle);
+                NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref tagValues, safetyHandle);
+#endif
+
+                // Create & schedule the RL
+                param = new RendererListParams(data.cullResults, ds, fs)
+                {
+                    tagValues = tagValues,
+                    stateBlocks = stateBlocks
+
+                };
+
+                rl = context.CreateRendererList(ref param);
+
+                // we need to explicitly release the SafetyHandle
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                AtomicSafetyHandle.Release(safetyHandle);
+#endif
+            }
+        }
+
+        static ShaderTagId[] s_ShaderTagValues = new ShaderTagId[1];
+        static RenderStateBlock[] s_RenderStateBlocks = new RenderStateBlock[1];
+        // Create a RendererList using a RenderStateBlock override is quite common so we have this optimized utility function for it
+        internal static void CreateRendererListWithRenderStateBlock(RenderGraph renderGraph, RenderingData data, DrawingSettings ds, FilteringSettings fs, RenderStateBlock rsb, ref RendererListHandle rl)
+        {
+            s_ShaderTagValues[0] = ShaderTagId.none;
+            s_RenderStateBlocks[0] = rsb;
+            NativeArray<ShaderTagId> tagValues = new NativeArray<ShaderTagId>(s_ShaderTagValues, Allocator.Temp);
+            NativeArray<RenderStateBlock> stateBlocks = new NativeArray<RenderStateBlock>(s_RenderStateBlocks, Allocator.Temp);
+            var param = new RendererListParams(data.cullResults, ds, fs)
+            {
+                tagValues = tagValues,
+                stateBlocks = stateBlocks,
+                isPassTagName = false
+            };
+            rl = renderGraph.CreateRendererList(param);
+        }
+
+        // Caches render texture format support. SystemInfo.SupportsRenderTextureFormat allocates memory due to boxing.
         static Dictionary<RenderTextureFormat, bool> m_RenderTextureFormatSupport = new Dictionary<RenderTextureFormat, bool>();
-        static Dictionary<GraphicsFormat, Dictionary<FormatUsage, bool>> m_GraphicsFormatSupport = new Dictionary<GraphicsFormat, Dictionary<FormatUsage, bool>>();
 
         internal static void ClearSystemInfoCache()
         {
             m_RenderTextureFormatSupport.Clear();
-            m_GraphicsFormatSupport.Clear();
         }
 
         /// <summary>
@@ -289,32 +398,16 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
-        /// Checks if a texture format is supported by the run-time system.
-        /// Similar to <see cref="SystemInfo.IsFormatSupported"/>, but doesn't allocate memory.
+        /// Obsolete. Use <see cref="SystemInfo.IsFormatSupported"/> instead.
         /// </summary>
         /// <param name="format">The format to look up.</param>
         /// <param name="usage">The format usage to look up.</param>
         /// <returns>Returns true if the graphics card supports the given <c>GraphicsFormat</c></returns>
+        [Obsolete("Use SystemInfo.IsFormatSupported instead.", false)]
         public static bool SupportsGraphicsFormat(GraphicsFormat format, FormatUsage usage)
         {
-            bool support = false;
-            if (!m_GraphicsFormatSupport.TryGetValue(format, out var uses))
-            {
-                uses = new Dictionary<FormatUsage, bool>();
-                support = SystemInfo.IsFormatSupported(format, usage);
-                uses.Add(usage, support);
-                m_GraphicsFormatSupport.Add(format, uses);
-            }
-            else
-            {
-                if (!uses.TryGetValue(usage, out support))
-                {
-                    support = SystemInfo.IsFormatSupported(format, usage);
-                    uses.Add(usage, support);
-                }
-            }
-
-            return support;
+	    GraphicsFormatUsage graphicsFormatUsage = (GraphicsFormatUsage)(1 << (int)usage);
+	    return SystemInfo.IsFormatSupported(format, graphicsFormatUsage);
         }
 
         /// <summary>
@@ -338,26 +431,6 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         /// <param name="colorBuffers"></param>
         /// <returns></returns>
-        [Obsolete("Use RTHandles for colorBuffers")]
-        internal static uint GetValidColorBufferCount(RenderTargetIdentifier[] colorBuffers)
-        {
-            uint nonNullColorBuffers = 0;
-            if (colorBuffers != null)
-            {
-                foreach (var identifier in colorBuffers)
-                {
-                    if (identifier != 0)
-                        ++nonNullColorBuffers;
-                }
-            }
-            return nonNullColorBuffers;
-        }
-
-        /// <summary>
-        /// Return the number of items in colorBuffers actually referring to an existing RenderTarget
-        /// </summary>
-        /// <param name="colorBuffers"></param>
-        /// <returns></returns>
         internal static uint GetValidColorBufferCount(RTHandle[] colorBuffers)
         {
             uint nonNullColorBuffers = 0;
@@ -370,17 +443,6 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
             return nonNullColorBuffers;
-        }
-
-        /// <summary>
-        /// Return true if colorBuffers is an actual MRT setup
-        /// </summary>
-        /// <param name="colorBuffers"></param>
-        /// <returns></returns>
-        [Obsolete("Use RTHandles for colorBuffers")]
-        internal static bool IsMRT(RenderTargetIdentifier[] colorBuffers)
-        {
-            return GetValidColorBufferCount(colorBuffers) > 1;
         }
 
         /// <summary>
@@ -415,7 +477,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="source"></param>
         /// <param name="value"></param>
         /// <returns></returns>
-        internal static int IndexOf(RenderTargetIdentifier[] source, RenderTargetIdentifier value)
+        internal static int IndexOf(RTHandle[] source, RenderTargetIdentifier value)
         {
             for (int i = 0; i < source.Length; ++i)
             {
@@ -426,17 +488,25 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
+        /// Return the index where value was found source. Otherwise, return -1. (without recurring to Linq)
+        /// </summary>
+        /// <param name="source"></param>
+        /// <param name="value"></param>
+        /// <returns></returns>
+        internal static int IndexOf(RTHandle[] source, RTHandle value) => IndexOf(source, value.nameID);
+
+        /// <summary>
         /// Return the number of RenderTargetIdentifiers in "source" that are valid (not 0) and different from "value" (without recurring to Linq)
         /// </summary>
         /// <param name="source"></param>
         /// <param name="value"></param>
         /// <returns></returns>
-        internal static uint CountDistinct(RenderTargetIdentifier[] source, RenderTargetIdentifier value)
+        internal static uint CountDistinct(RTHandle[] source, RTHandle value)
         {
             uint count = 0;
             for (int i = 0; i < source.Length; ++i)
             {
-                if (source[i] != value && source[i] != 0)
+                if (source[i] != null && source[i].nameID != 0 && source[i].nameID != value.nameID)
                     ++count;
             }
             return count;
@@ -447,11 +517,11 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         /// <param name="source"></param>
         /// <returns></returns>
-        internal static int LastValid(RenderTargetIdentifier[] source)
+        internal static int LastValid(RTHandle[] source)
         {
             for (int i = source.Length - 1; i >= 0; --i)
             {
-                if (source[i] != 0)
+                if (source[i] != null && source[i].nameID != 0)
                     return i;
             }
             return -1;
@@ -474,13 +544,13 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="left"></param>
         /// <param name="right"></param>
         /// <returns></returns>
-        internal static bool SequenceEqual(RenderTargetIdentifier[] left, RenderTargetIdentifier[] right)
+        internal static bool SequenceEqual(RTHandle[] left, RTHandle[] right)
         {
             if (left.Length != right.Length)
                 return false;
 
             for (int i = 0; i < left.Length; ++i)
-                if (left[i] != right[i])
+                if (left[i].nameID != right[i].nameID)
                     return false;
 
             return true;

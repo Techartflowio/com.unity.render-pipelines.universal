@@ -18,7 +18,7 @@ This page contains the following sections:
 
 Create the sample scene to follow the steps in this section:
 
-1. Install URP into an existing Unity project, or create a new project using the [__Universal Project Template__](creating-a-new-project-with-urp.md).
+1. Install URP into an existing Unity project, or create a new project using the [**Universal Project Template**](creating-a-new-project-with-urp.md).
 
 2. In the sample Scene, create a plane GameObject and place it so that it occludes some of the GameObjects.
 
@@ -28,7 +28,7 @@ Create the sample scene to follow the steps in this section:
 
 4. Create a new shader and assign it to the material. Copy and paste the Unity shader source code from the page [URP unlit basic shader](writing-shaders-urp-basic-unlit-structure.md).
 
-5. Select the URP Asset. If you created the project using the Universal Render Pipeline template, the URP Asset path is `Assets/Settings/UniversalRP-HighQuality`.
+5. Select the URP Asset.
 
 6. In the URP Asset, in the General section, enable `Depth Texture`.
 
@@ -82,11 +82,11 @@ Make the following changes to the ShaderLab code:
 
    For the reconstruction function (`ComputeWorldSpacePosition`) to work, the depth value must be in the normalized device coordinate (NDC) space. In D3D, Z is in range `[0,1]`, in OpenGL, Z is in range `[-1, 1]`.
 
-   This example uses the `UNITY_REVERSED_Z` constant to determine the platform and adjust the Z value range. See step 6 in this example for more explanations.
+   This example uses the `UNITY_REVERSED_Z` constant to determine the platform and adjust the Z value range. Check step 6 in this example for more explanations.
 
    The `UNITY_NEAR_CLIP_VALUE` variable is a platform independent near clipping plane value for the clip space.
 
-   For more information, see [Platform-specific rendering differences](https://docs.unity3d.com/Manual/SL-PlatformDifferences.html).
+   For more information, refer to [Platform-specific rendering differences](https://docs.unity3d.com/Manual/SL-PlatformDifferences.html).
 
 5. Reconstruct world space positions from the UV and Z coordinates of pixels.
 

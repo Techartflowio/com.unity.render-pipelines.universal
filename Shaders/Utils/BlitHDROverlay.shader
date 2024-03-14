@@ -19,7 +19,7 @@ Shader "Hidden/Universal/BlitHDROverlay"
         TEXTURE2D_X(_OverlayUITexture);
 
         float4 _HDROutputLuminanceParams;
-        
+
         #define MinNits    _HDROutputLuminanceParams.x
         #define MaxNits    _HDROutputLuminanceParams.y
         #define PaperWhite _HDROutputLuminanceParams.z

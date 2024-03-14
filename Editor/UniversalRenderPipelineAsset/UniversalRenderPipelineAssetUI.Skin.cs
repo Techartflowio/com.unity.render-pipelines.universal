@@ -13,6 +13,7 @@ namespace UnityEditor.Rendering.Universal
             public static GUIContent lightingSettingsText = EditorGUIUtility.TrTextContent("Lighting", "Settings that affect the lighting in the Scene");
             public static GUIContent shadowSettingsText = EditorGUIUtility.TrTextContent("Shadows", "Settings that configure how shadows look and behave, and can be used to balance between the visual quality and performance of shadows.");
             public static GUIContent postProcessingSettingsText = EditorGUIUtility.TrTextContent("Post-processing", "Settings that allow for fine tuning of post-processing effects in the Scene when this Render Pipeline Asset is in use.");
+            public static GUIContent volumeSettingsText = EditorGUIUtility.TrTextContent("Volumes", "Settings related to usage of Volume Components.");
             public static GUIContent advancedSettingsText = EditorGUIUtility.TrTextContent("Advanced");
             public static GUIContent adaptivePerformanceText = EditorGUIUtility.TrTextContent("Adaptive Performance");
 
@@ -49,6 +50,12 @@ namespace UnityEditor.Rendering.Universal
             public static GUIContent mainLightRenderingModeText = EditorGUIUtility.TrTextContent("Main Light", "Main light is the brightest directional light.");
             public static GUIContent supportsMainLightShadowsText = EditorGUIUtility.TrTextContent("Cast Shadows", "If enabled the main light can be a shadow casting light.");
             public static GUIContent mainLightShadowmapResolutionText = EditorGUIUtility.TrTextContent("Shadow Resolution", "Resolution of the main light shadowmap texture. If cascades are enabled, cascades will be packed into an atlas and this setting controls the maximum shadows atlas resolution.");
+
+            // Probe volumes
+            public static readonly GUIContent lightProbeSystemContent = EditorGUIUtility.TrTextContent("Light Probe System", "What system to use for Light Probes.");
+            public static readonly GUIContent probeVolumeMemoryBudget = EditorGUIUtility.TrTextContent("Memory Budget", "Determines the width and height of the 3D textures used to store lighting data from probes. Depth is fixed.");
+            public static readonly GUIContent supportProbeVolumeStreaming = EditorGUIUtility.TrTextContent("Enable Streaming", "Enable steaming of Cells in the Probe Volume system.");
+            public static readonly GUIContent probeVolumeSHBands = EditorGUIUtility.TrTextContent("SH Bands", "The number of Spherical Harmonic bands used by Probe Volumes to store lighting data. Choosing L2 provides better quality but with higher memory and runtime costs.");
 
             // Additional lights
             public static GUIContent addditionalLightsRenderingModeText = EditorGUIUtility.TrTextContent("Additional Lights", "Additional lights support.");
@@ -98,11 +105,16 @@ namespace UnityEditor.Rendering.Universal
             public static GUIContent colorGradingLutSize = EditorGUIUtility.TrTextContent("LUT size", "Sets the size of the internal and external color grading lookup textures (LUTs).");
             public static GUIContent useFastSRGBLinearConversion = EditorGUIUtility.TrTextContent("Fast sRGB/Linear conversions", "Use faster, but less accurate approximation functions when converting between the sRGB and Linear color spaces.");
             public static GUIContent supportDataDrivenLensFlare = EditorGUIUtility.TrTextContent("Data Driven Lens Flare", "When enabled, URP allocates shader variants and memory for Data Driven Lens Flare effect.");
+            public static GUIContent supportScreenSpaceLensFlare = EditorGUIUtility.TrTextContent("Screen Space Lens Flare", "When enabled, URP allocates shader variants and memory for Screen Space Lens Flare effect.");
             public static string colorGradingModeWarning = "HDR rendering is required to use the high dynamic range color grading mode. The low dynamic range will be used instead.";
             public static string colorGradingModeWithHDROutput = "With the current configuration, Unity uses the HDR color grading mode when outputting to an HDR display.";
             public static string colorGradingModeSpecInfo = "The high dynamic range color grading mode works best on platforms that support floating point textures.";
             public static string colorGradingLutSizeWarning = "The minimal recommended LUT size for the high dynamic range color grading mode is 32. Using lower values will potentially result in color banding and posterization effects.";
+
+            // Volumes
             public static GUIContent volumeFrameworkUpdateMode = EditorGUIUtility.TrTextContent("Volume Update Mode", "Select how Unity updates Volumes: every frame or when triggered via scripting. In the Editor, Unity updates Volumes every frame when not in the Play mode.");
+            public static GUIContent volumeProfileLabel = EditorGUIUtility.TrTextContent("Volume Profile", "Settings that will override the values defined in the Default Volume Profile set in the Render Pipeline Global settings. Local Volumes inside scenes may override these settings further.");
+            public static System.Lazy<GUIStyle> volumeProfileContextMenuStyle = new(() => new GUIStyle(CoreEditorStyles.contextMenuStyle) { margin = new RectOffset(0, 1, 3, 0) });
 
             // Adaptive performance settings
             public static GUIContent useAdaptivePerformance = EditorGUIUtility.TrTextContent("Use adaptive performance", "Allows Adaptive Performance to adjust rendering quality during runtime");
@@ -120,8 +132,6 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUIUtility.TrTextContent("Some Graphics API(s) in the Player Graphics APIs list are incompatible with Light Layers.  Switching to these Graphics APIs at runtime can cause issues: ");
             public static GUIContent rendererUnsupportedAPIMessage =
                 EditorGUIUtility.TrTextContent("Some Renderer(s) in the Renderer List are incompatible with the Player Graphics APIs list.  Switching to these renderers at runtime can cause issues.\n\n");
-            public static GUIContent shadowCascadesUnsupportedMessage =
-                EditorGUIUtility.TrTextContent("Unity does not support shadow cascades on OpenGL ES 2.0 platforms. If you build a Player for the OpenGL ES 2.0 API, Unity ignores this setting at runtime and sets the number of cascades to 1.");
 
             // Dropdown menu options
             public static string[] mainLightOptions = { "Disabled", "Per Pixel" };

@@ -2,7 +2,7 @@
 
 This example shows a basic URP-compatible shader. This shader fills the mesh shape with a color predefined in the shader code.
 
-To see the shader in action, copy and paste the following ShaderLab code into the Shader asset.
+To try the shader for yourself, copy and paste the following ShaderLab code into the Shader asset.
 
 ```c++
 // This shader fills the mesh shape with a color predefined in the code.
@@ -129,21 +129,21 @@ A SubShader Tag with a name of `RenderPipeline` tells Unity which render pipelin
 
 To execute the same shader in different render pipelines, create multiple SubShader blocks with different `RenderPipeline` tag values. To execute a SubShader block in HDRP, set the `RenderPipeline` tag to `HDRenderPipeline`, to execute it in the Built-in Render Pipeline, set `RenderPipeline` to an empty value.
 
-For more information on SubShader Tags, see [ShaderLab: SubShader Tags](https://docs.unity3d.com/Manual/SL-SubShaderTags.html).
+For more information on SubShader Tags, refer to [ShaderLab: SubShader Tags](https://docs.unity3d.com/Manual/SL-SubShaderTags.html).
 
 ### <a name="pass"></a>Pass block
 
-In this example, there is one Pass block that contains the HLSL program code. For more information on Pass blocks, see [ShaderLab: Pass](https://docs.unity3d.com/Manual/SL-Pass.html).
+In this example, there is one Pass block that contains the HLSL program code. For more information on Pass blocks, refer to [ShaderLab: Pass](https://docs.unity3d.com/Manual/SL-Pass.html).
 
-A Pass block can optionally contain a Pass tags block. For more information, see [URP ShaderLab Pass tags](urp-shaders/urp-shaderlab-pass-tags.md).
+A Pass block can optionally contain a Pass tags block. For more information, refer to [URP ShaderLab Pass tags](urp-shaders/urp-shaderlab-pass-tags.md).
 
 ### <a name="hlsl"></a>HLSLPROGRAM block
 
 This block contains the HLSL program code.
 
-> **NOTE**: HLSL language is the preferred language for URP shaders.
+> **Note**: HLSL language is the preferred language for URP shaders.
 
-> **NOTE**: URP supports the CG language. If you add the CGPROGRAM/ENDCGPROGRAM block in a shader, Unity includes shaders from the Built-in Render Pipeline library automatically. If you include shaders from the SRP shader library, some SRP shader macros and functions might conflict with the Built-in Render Pipeline shader functions. Shaders with the CGPROGRAM block are not SRP Batcher compatible.
+> **Note**: URP supports the CG language. If you add the CGPROGRAM/ENDCGPROGRAM block in a shader, Unity includes shaders from the Built-in Render Pipeline library automatically. If you include shaders from the SRP shader library, some SRP shader macros and functions might conflict with the Built-in Render Pipeline shader functions. Shaders with the CGPROGRAM block are not SRP Batcher compatible.
 
 This block contains the `#include` declaration with the reference to the `Core.hlsl` file.
 

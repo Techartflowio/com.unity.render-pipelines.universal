@@ -2,7 +2,7 @@
 
 This page describes how to upgrade from an older version of the Universal Render Pipeline (URP) to URP 13 (Unity 2022.1).
 
-For information on converting assets made for a Built-in Render Pipeline project to assets compatible with URP, see the page [Render Pipeline Converter](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@14.0/manual/features/rp-converter.html).
+For information on converting assets made for a Built-in Render Pipeline project to assets compatible with URP, refer to the page [Render Pipeline Converter](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@14.0/manual/features/rp-converter.html).
 
 ## Upgrading from URP 12 (Unity 2021.2)
 
@@ -60,9 +60,9 @@ The public interfaces `ScriptableRenderer.cameraColorTarget` and `ScriptableRend
 `RTHandle` targets do not use the `CommandBuffer.GetTemporaryRT` method and persist for more frames than the `RenderTargetIdentifier` structs. You cannot allocate `RTHandle` targets with the properties `GraphicsFormat` and `DepthBufferBits` set to any value except for 0. The `cameraDepthTarget` properties  must be separate from the `cameraColorTarget` properties.
 
 The following helper functions let you create and use temporary render target with the `RTHandle` system in a similar way as with the `GetTemporaryRT` method previously:
-     
+
 * `RenderingUtils.ReAllocateIfNeeded`
-     
+
 * `ShadowUtils.ShadowRTReAllocateIfNeeded`
 
 If the render target does not change within the lifetime of the application, use the `RTHandles.Alloc` method to allocate an `RTHandle` target. This method is efficient since the code does not have to check if a render target should be allocated on each frame.
@@ -105,7 +105,7 @@ public class CustomPass : ScriptableRenderPass
                                     ref RenderingData renderingData)
     {
         CommandBuffer cmd = CommandBufferPool.Get();
-        // Set the same target for color and depth        
+        // Set the same target for color and depth
         ScriptableRenderer.SetRenderTarget(cmd, m_Destination, m_Destination, clearFlag,
                                               clearColor);
         context.ExecuteCommandBuffer(cmd);
@@ -184,7 +184,7 @@ public class CustomPass : ScriptableRenderPass
 
 ### DepthNormals Pass
 
-Starting from version 10.0.x, URP can generate a normal texture called `_CameraNormalsTexture`. To render to this texture in your custom shader, add a Pass with the name `DepthNormals`. For example, see the implementation in `Lit.shader`.
+Starting from version 10.0.x, URP can generate a normal texture called `_CameraNormalsTexture`. To render to this texture in your custom shader, add a Pass with the name `DepthNormals`. For an example, check the implementation in `Lit.shader`.
 
 ### Screen Space Ambient Occlusion (SSAO)
 
@@ -219,7 +219,7 @@ If you intend to use the SSAO effect with your custom shaders, consider the foll
     normalizedScreenSpaceUV)
     ```
 
-To support SSAO in custom shader, add the `DepthNormals` Pass and the `_SCREEN_SPACE_OCCLUSION` keyword the the shader. For example, see `Lit.shader`.
+To support SSAO in custom shader, add the `DepthNormals` Pass and the `_SCREEN_SPACE_OCCLUSION` keyword the the shader. For an example, check `Lit.shader`.
 
 If your custom shader implements custom lighting functions, use the function `GetScreenSpaceAmbientOcclusion(float2 normalizedScreenSpaceUV)` to get the `AmbientOcclusionFactor` value for your lighting calculations.
 

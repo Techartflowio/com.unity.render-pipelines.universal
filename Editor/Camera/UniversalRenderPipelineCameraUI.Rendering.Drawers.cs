@@ -13,10 +13,6 @@ namespace UnityEditor.Rendering.Universal
         {
             static bool s_PostProcessingWarningShown = false;
 
-            static readonly CED.IDrawer PostProcessingWarningInit = CED.Group(
-                (serialized, owner) => s_PostProcessingWarningShown = false
-            );
-
             private static readonly CED.IDrawer PostProcessingWarningDrawer = CED.Conditional(
                 (serialized, owner) => IsAnyRendererHasPostProcessingEnabled(serialized, UniversalRenderPipeline.asset) && serialized.renderPostProcessing.boolValue,
                 (serialized, owner) =>
@@ -88,10 +84,6 @@ namespace UnityEditor.Rendering.Universal
                     CameraUI.Rendering.Drawer_Rendering_StopNaNs
                     ),
                 PostProcessingStopNaNsWarningDrawer,
-                CED.Conditional(
-                    (serialized, owner) => serialized.stopNaNs.boolValue && CoreEditorUtils.buildTargets.Contains(GraphicsDeviceType.OpenGLES2),
-                    (serialized, owner) => EditorGUILayout.HelpBox(Styles.stopNaNsMessage, MessageType.Warning)
-                    ),
                 CED.Group(
                     CameraUI.Rendering.Drawer_Rendering_Dithering
                     ),
@@ -119,6 +111,8 @@ namespace UnityEditor.Rendering.Universal
 
             public static readonly CED.IDrawer Drawer;
 
+            public static readonly CED.IDrawer DrawerPreset;
+
             static Rendering()
             {
                 Drawer = CED.AdditionalPropertiesFoldoutGroup(
@@ -128,7 +122,6 @@ namespace UnityEditor.Rendering.Universal
                     ExpandableAdditional.Rendering,
                     k_ExpandedAdditionalState,
                     CED.Group(
-                        PostProcessingWarningInit,
                         CED.Group(
                             DrawerRenderingRenderer
                         ),
@@ -140,20 +133,21 @@ namespace UnityEditor.Rendering.Universal
                         )
                     ),
                     CED.noop,
-                    FoldoutOption.Indent
+                    FoldoutOption.Indent,
+                    (serialized, owner) => s_PostProcessingWarningShown = false
+                );
+
+                DrawerPreset = CED.FoldoutGroup(
+                    CameraUI.Rendering.Styles.header,
+                    Expandable.Rendering,
+                    k_ExpandedState,
+                    FoldoutOption.Indent,
+                    CED.Group(
+                        CameraUI.Rendering.Drawer_Rendering_CullingMask,
+                        CameraUI.Rendering.Drawer_Rendering_OcclusionCulling
+                    )
                 );
             }
-
-            public static readonly CED.IDrawer DrawerPreset = CED.FoldoutGroup(
-                CameraUI.Rendering.Styles.header,
-                Expandable.Rendering,
-                k_ExpandedState,
-                FoldoutOption.Indent,
-                CED.Group(
-                    CameraUI.Rendering.Drawer_Rendering_CullingMask,
-                    CameraUI.Rendering.Drawer_Rendering_OcclusionCulling
-                )
-            );
 
             static void DrawerRenderingRenderer(UniversalRenderPipelineSerializedCamera p, Editor owner)
             {
@@ -230,9 +224,6 @@ namespace UnityEditor.Rendering.Universal
             static void DrawerRenderingSMAAQuality(UniversalRenderPipelineSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.antialiasingQuality, Styles.antialiasingQuality);
-
-                if (CoreEditorUtils.buildTargets.Contains(GraphicsDeviceType.OpenGLES2))
-                    EditorGUILayout.HelpBox(Styles.SMAANotSupported, MessageType.Warning);
             }
 
             static void DrawerRenderingTAAQuality(UniversalRenderPipelineSerializedCamera p, Editor owner)

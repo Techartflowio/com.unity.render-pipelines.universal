@@ -1,5 +1,6 @@
 using System;
 using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine.Rendering.Universal.Internal
 {
@@ -14,7 +15,7 @@ namespace UnityEngine.Rendering.Universal.Internal
     {
         RTHandle m_Source;
         private PassData m_PassData;
-
+        
         // Use specialed URP fragment shader pass for debug draw support and color space conversion/encoding support.
         // See CoreBlit.shader and BlitHDROverlay.shader
         static class BlitPassNames
@@ -25,7 +26,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         enum BlitType
         {
-            Core = 0, // Core blit
+            Core = 0, // Core blit 
             HDR = 1, // Blit with HDR encoding and overlay UI compositing
             Count = 2
         }
@@ -36,7 +37,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             public int nearestSamplerPass;
             public int bilinearSamplerPass;
         }
-
+        
         BlitMaterialData[] m_BlitMaterialData;
 
         /// <summary>
@@ -58,7 +59,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_BlitMaterialData = new BlitMaterialData[blitTypeCount];
             for (int i = 0; i < blitTypeCount; ++i)
             {
-                m_BlitMaterialData[i].material = i == (int)BlitType.Core ? blitMaterial : blitHDRMaterial;
+                m_BlitMaterialData[i].material = i == (int)BlitType.Core ? blitMaterial : blitHDRMaterial; 
                 m_BlitMaterialData[i].nearestSamplerPass = m_BlitMaterialData[i].material?.FindPass(BlitPassNames.NearestSampler) ?? -1;
                 m_BlitMaterialData[i].bilinearSamplerPass = m_BlitMaterialData[i].material?.FindPass(BlitPassNames.BilinearSampler) ?? -1;
             }
@@ -76,11 +77,10 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// </summary>
         /// <param name="baseDescriptor"></param>
         /// <param name="colorHandle"></param>
-        [Obsolete("Use RTHandles for colorHandle")]
+        [Obsolete("Use RTHandles for colorHandle", true)]
         public void Setup(RenderTextureDescriptor baseDescriptor, RenderTargetHandle colorHandle)
         {
-            if (m_Source?.nameID != colorHandle.Identifier())
-                m_Source = RTHandles.Alloc(colorHandle.Identifier());
+            throw new NotSupportedException("Setup with RenderTargetHandle has been deprecated. Use it with RTHandles instead.");
         }
 
         /// <summary>
@@ -105,7 +105,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             ref CameraData cameraData = ref renderingData.cameraData;
             DebugHandler debugHandler = GetActiveDebugHandler(ref renderingData);
             bool resolveToDebugScreen = debugHandler != null && debugHandler.WriteToDebugScreenTexture(ref cameraData);
-
+            
             if (resolveToDebugScreen)
             {
                 ConfigureTarget(debugHandler.DebugScreenColorHandle, debugHandler.DebugScreenDepthHandle);
@@ -123,6 +123,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 Debug.LogErrorFormat("Missing {0}. {1} render pass will not execute. Check for missing reference in the renderer resources.", m_PassData.blitMaterialData, GetType().Name);
                 return;
             }
+
 
             ref CameraData cameraData = ref renderingData.cameraData;
 
@@ -148,7 +149,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(cmd, ref cameraData, !resolveToDebugScreen);
 
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.LinearToSRGBConversion,
-                    m_PassData.requireSrgbConversion);
+                    cameraData.requireSrgbConversion);
 
                 if (outputsToHDR)
                 {
@@ -171,46 +172,69 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 if (resolveToDebugScreen)
                 {
+                    // Blit to the debugger texture instead of the camera target
                     int shaderPassIndex = m_Source.rt?.filterMode == FilterMode.Bilinear ? m_PassData.blitMaterialData.bilinearSamplerPass : m_PassData.blitMaterialData.nearestSamplerPass;
-
                     Vector2 viewportScale = m_Source.useScaling ? new Vector2(m_Source.rtHandleProperties.rtHandleScale.x, m_Source.rtHandleProperties.rtHandleScale.y) : Vector2.one;
                     Blitter.BlitTexture(cmd, m_Source, viewportScale, m_PassData.blitMaterialData.material, shaderPassIndex);
 
                     cameraData.renderer.ConfigureCameraTarget(debugHandler.DebugScreenColorHandle, debugHandler.DebugScreenDepthHandle);
                 }
+                // TODO RENDERGRAPH: See https://jira.unity3d.com/projects/URP/issues/URP-1737
+                // This branch of the if statement must be removed for render graph and the new command list with a novel way of using Blitter with fill mode
+                else if (GL.wireframe && cameraData.isSceneViewCamera)
+                {
+                    // This set render target is necessary so we change the LOAD state to DontCare.
+                    cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget,
+                        RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, // color
+                        RenderBufferLoadAction.DontCare, RenderBufferStoreAction.DontCare); // depth
+                    cmd.Blit(m_Source.nameID, cameraTargetHandle.nameID);
+                }
                 else
                 {
-                    FinalBlitPass.ExecutePass(ref renderingData, m_PassData.blitMaterialData, cameraTargetHandle, m_Source);
+                    // TODO: Final blit pass should always blit to backbuffer. The first time we do we don't need to Load contents to tile.
+                    // We need to keep in the pipeline of first render pass to each render target to properly set load/store actions.
+                    // meanwhile we set to load so split screen case works.
+                    var loadAction = RenderBufferLoadAction.DontCare;
+                    if (!cameraData.isSceneViewCamera && !cameraData.isDefaultViewport)
+                        loadAction = RenderBufferLoadAction.Load;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    if (cameraData.xr.enabled)
+                        loadAction = RenderBufferLoadAction.Load;
+#endif
+
+                    CoreUtils.SetRenderTarget(renderingData.commandBuffer, cameraTargetHandle, loadAction, RenderBufferStoreAction.Store, ClearFlag.None, Color.clear);
+                    FinalBlitPass.ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, m_Source, cameraTargetHandle, ref renderingData);
                     cameraData.renderer.ConfigureCameraTarget(cameraTargetHandle, cameraTargetHandle);
                 }
             }
         }
 
-        private static void ExecutePass(ref RenderingData renderingData, in BlitMaterialData blitMaterialData, RTHandle cameraTarget, RTHandle source)
+        private static void ExecutePass(RasterCommandBuffer cmd, PassData data, RTHandle source, RTHandle destination, ref RenderingData renderingData)
         {
-            var cameraData = renderingData.cameraData;
-            var cmd = renderingData.commandBuffer;
-
-            // TODO: Final blit pass should always blit to backbuffer. The first time we do we don't need to Load contents to tile.
-            // We need to keep in the pipeline of first render pass to each render target to properly set load/store actions.
-            // meanwhile we set to load so split screen case works.
-            var loadAction = RenderBufferLoadAction.DontCare;
-            if (!cameraData.isSceneViewCamera && !cameraData.isDefaultViewport)
-                loadAction = RenderBufferLoadAction.Load;
+            ref var cameraData = ref renderingData.cameraData;
+            bool isRenderToBackBufferTarget = !cameraData.isSceneViewCamera;
 #if ENABLE_VR && ENABLE_XR_MODULE
             if (cameraData.xr.enabled)
-                loadAction = RenderBufferLoadAction.Load;
+                isRenderToBackBufferTarget = new RenderTargetIdentifier(destination.nameID, 0, CubemapFace.Unknown, -1) == new RenderTargetIdentifier(cameraData.xr.renderTarget, 0, CubemapFace.Unknown, -1);
 #endif
+            Vector2 viewportScale = source.useScaling ? new Vector2(source.rtHandleProperties.rtHandleScale.x, source.rtHandleProperties.rtHandleScale.y) : Vector2.one;
 
-            int shaderPassIndex = source.rt?.filterMode == FilterMode.Bilinear ? blitMaterialData.bilinearSamplerPass : blitMaterialData.nearestSamplerPass;
-            RenderingUtils.FinalBlit(cmd, ref cameraData, source, cameraTarget, loadAction, RenderBufferStoreAction.Store, blitMaterialData.material, shaderPassIndex);
+            // We y-flip if
+            // 1) we are blitting from render texture to back buffer(UV starts at bottom) and
+            // 2) renderTexture starts UV at top
+            bool yflip = isRenderToBackBufferTarget && cameraData.targetTexture == null && SystemInfo.graphicsUVStartsAtTop;
+            Vector4 scaleBias = yflip ? new Vector4(viewportScale.x, -viewportScale.y, 0, viewportScale.y) : new Vector4(viewportScale.x, viewportScale.y, 0, 0);
+            if (isRenderToBackBufferTarget)
+                cmd.SetViewport(cameraData.pixelRect);
+
+            int shaderPassIndex = source.rt?.filterMode == FilterMode.Bilinear ? data.blitMaterialData.bilinearSamplerPass : data.blitMaterialData.nearestSamplerPass;
+            Blitter.BlitTexture(cmd, source, scaleBias, data.blitMaterialData.material, shaderPassIndex);
         }
 
         private class PassData
         {
             internal TextureHandle source;
             internal TextureHandle destination;
-
             internal int sourceID;
             internal Vector4 hdrOutputLuminanceParams;
             internal bool requireSrgbConversion;
@@ -232,17 +256,15 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         internal void Render(RenderGraph renderGraph, ref RenderingData renderingData, TextureHandle src, TextureHandle dest, TextureHandle overlayUITexture)
         {
-            using (var builder = renderGraph.AddRenderPass<PassData>("Final Blit", out var passData, base.profilingSampler))
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Final Blit", out var passData, base.profilingSampler))
             {
                 bool outputsToHDR = renderingData.cameraData.isHDROutputActive;
-                passData.source = src;
-                passData.destination = dest;
+                InitPassData(ref renderingData, ref passData, outputsToHDR ? BlitType.HDR : BlitType.Core);
+                passData.renderingData = renderingData;
                 passData.sourceID = ShaderPropertyId.sourceTex;
 
-                InitPassData(ref renderingData, ref passData, outputsToHDR ? BlitType.HDR : BlitType.Core);
-
-                builder.UseColorBuffer(passData.destination, 0);
-                builder.ReadTexture(passData.source);
+                passData.source = builder.UseTexture(src, IBaseRenderGraphBuilder.AccessFlags.Read);
+                passData.destination = builder.UseTextureFragment(dest, 0, IBaseRenderGraphBuilder.AccessFlags.Write); ;
 
                 if (outputsToHDR && overlayUITexture.IsValid())
                 {
@@ -251,20 +273,22 @@ namespace UnityEngine.Rendering.Universal.Internal
                     ref CameraData cameraData = ref renderingData.cameraData;
                     UniversalRenderPipeline.GetHDROutputLuminanceParameters(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, tonemapping, out passData.hdrOutputLuminanceParams);
 
-                    builder.ReadTexture(overlayUITexture);
+                    builder.UseTexture(overlayUITexture, IBaseRenderGraphBuilder.AccessFlags.Read);
                 }
                 else
                 {
                     passData.hdrOutputLuminanceParams = new Vector4(-1.0f, -1.0f, -1.0f, -1.0f);
                 }
 
-                builder.SetRenderFunc((PassData data, RenderGraphContext context) =>
+                builder.AllowGlobalStateModification(true);
+
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
                     data.blitMaterialData.material.enabledKeywords = null;
 
                     CoreUtils.SetKeyword(context.cmd, ShaderKeywordStrings.LinearToSRGBConversion, data.requireSrgbConversion);
                     data.blitMaterialData.material.SetTexture(data.sourceID, data.source);
-
+                    
                     DebugHandler debugHandler = GetActiveDebugHandler(ref data.renderingData);
                     bool resolveToDebugScreen = debugHandler != null && debugHandler.WriteToDebugScreenTexture(ref data.renderingData.cameraData);
 
@@ -287,12 +311,12 @@ namespace UnityEngine.Rendering.Universal.Internal
                     {
                         RTHandle sourceTex = data.source;
                         Vector2 viewportScale = sourceTex.useScaling ? new Vector2(sourceTex.rtHandleProperties.rtHandleScale.x, sourceTex.rtHandleProperties.rtHandleScale.y) : Vector2.one;
-
+                        
                         int shaderPassIndex = sourceTex.rt?.filterMode == FilterMode.Bilinear ? data.blitMaterialData.bilinearSamplerPass : data.blitMaterialData.nearestSamplerPass;
                         Blitter.BlitTexture(context.cmd, sourceTex, viewportScale, data.blitMaterialData.material, shaderPassIndex);
                     }
                     else
-                        ExecutePass(ref data.renderingData, data.blitMaterialData, data.destination, data.source);
+                        ExecutePass(context.cmd, data, data.source, data.destination, ref data.renderingData);
                 });
             }
         }

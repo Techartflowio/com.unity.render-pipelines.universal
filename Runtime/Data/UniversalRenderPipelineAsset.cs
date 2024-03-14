@@ -255,7 +255,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Defines if profiling is logged or not. This enum is not longer in use, use the Profiler instead.
     /// </summary>
-    [Obsolete("PipelineDebugLevel is replaced to use the profiler and has no effect.", false)]
+    [Obsolete("PipelineDebugLevel is replaced to use the profiler and has no effect.", true)]
     public enum PipelineDebugLevel
     {
         /// <summary>
@@ -287,11 +287,6 @@ namespace UnityEngine.Rendering.Universal
         /// Use this for 2D Renderer.
         /// </summary>
         _2DRenderer,
-        /// <summary>
-        /// This name was used before the Universal Renderer was implemented.
-        /// </summary>
-        [Obsolete("ForwardRenderer has been renamed (UnityUpgradable) -> UniversalRenderer", true)]
-        ForwardRenderer = UniversalRenderer,
     }
 
     /// <summary>
@@ -384,8 +379,21 @@ namespace UnityEngine.Rendering.Universal
     {
         /// <summary>Unity uses the Bayer matrix texture to compute the LOD cross-fade dithering.</summary>
         BayerMatrix,
+
         /// <summary>Unity uses the precomputed blue noise texture to compute the LOD cross-fade dithering.</summary>
         BlueNoise
+    }
+
+    /// <summary>
+    /// The available Probe system used.
+    /// </summary>
+    public enum LightProbeSystem
+    {
+        /// <summary>The light probe group system.</summary>
+        [InspectorName("Light Probe Groups")]
+        LegacyLightProbes = 0,
+        /// <summary>Probe Volume system.</summary>
+        ProbeVolumes = 1,
     }
 
     /// <summary>
@@ -414,14 +422,14 @@ namespace UnityEngine.Rendering.Universal
 #if UNITY_EDITOR
     [ShaderKeywordFilter.ApplyRulesIfTagsEqual("RenderPipeline", "UniversalPipeline")]
 #endif
-    public partial class UniversalRenderPipelineAsset : RenderPipelineAsset, ISerializationCallbackReceiver
+    public partial class UniversalRenderPipelineAsset : RenderPipelineAsset<UniversalRenderPipeline>, ISerializationCallbackReceiver, IProbeVolumeEnabledRenderPipeline
     {
         Shader m_DefaultShader;
         ScriptableRenderer[] m_Renderers = new ScriptableRenderer[1];
 
         // Default values set when a new UniversalRenderPipeline asset is created
-        [SerializeField] int k_AssetVersion = 11;
-        [SerializeField] int k_AssetPreviousVersion = 11;
+        [SerializeField] int k_AssetVersion = 12;
+        [SerializeField] int k_AssetPreviousVersion = 12;
 
         // Deprecated settings for upgrading sakes
         [SerializeField] RendererType m_RendererType = RendererType.UniversalRenderer;
@@ -461,6 +469,20 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.SelectIf(ShEvalMode.PerVertex, keywordNames: new [] { ShaderKeywordStrings.EVALUATE_SH_VERTEX })]
 #endif
         [SerializeField] ShEvalMode m_ShEvalMode = ShEvalMode.Auto;
+
+        // Probe volume settings
+#if UNITY_EDITOR
+        [ShaderKeywordFilter.RemoveIf(LightProbeSystem.LegacyLightProbes, keywordNames: new [] { ShaderKeywordStrings.ProbeVolumeL1, ShaderKeywordStrings.ProbeVolumeL2 })]
+        [ShaderKeywordFilter.SelectIf(LightProbeSystem.ProbeVolumes,      keywordNames: new [] { ShaderKeywordStrings.ProbeVolumeL1, ShaderKeywordStrings.ProbeVolumeL2 })]
+#endif
+        [SerializeField] LightProbeSystem m_LightProbeSystem = LightProbeSystem.LegacyLightProbes;
+        [SerializeField] ProbeVolumeTextureMemoryBudget m_ProbeVolumeMemoryBudget = ProbeVolumeTextureMemoryBudget.MemoryBudgetMedium;
+        [SerializeField] bool m_SupportProbeVolumeStreaming = false;
+#if UNITY_EDITOR
+        [ShaderKeywordFilter.RemoveIf(ProbeVolumeSHBands.SphericalHarmonicsL1, keywordNames: ShaderKeywordStrings.ProbeVolumeL2)]
+        [ShaderKeywordFilter.RemoveIf(ProbeVolumeSHBands.SphericalHarmonicsL2, keywordNames: ShaderKeywordStrings.ProbeVolumeL1)]
+#endif
+        [SerializeField] ProbeVolumeSHBands m_ProbeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL1;
 
         // Main directional light Settings
         [SerializeField] LightRenderingMode m_MainLightRenderingMode = LightRenderingMode.PerPixel;
@@ -529,11 +551,10 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] bool m_SupportsLightCookies = true;
 #if UNITY_EDITOR
         // multi_compile_fragment _ _LIGHT_LAYERS
-        [ShaderKeywordFilter.ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.OpenGLES2)]
         [ShaderKeywordFilter.SelectOrRemove(true, keywordNames: ShaderKeywordStrings.LightLayers)]
 #endif
         [SerializeField] bool m_SupportsLightLayers = false;
-        [SerializeField] [Obsolete] PipelineDebugLevel m_DebugLevel;
+        [SerializeField] [Obsolete("",true)] PipelineDebugLevel m_DebugLevel;
         [SerializeField] StoreActionsOptimization m_StoreActionsOptimization = StoreActionsOptimization.Auto;
         [SerializeField] bool m_EnableRenderGraph = false;
 
@@ -548,6 +569,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
         [SerializeField] bool m_UseFastSRGBLinearConversion = false;
         [SerializeField] bool m_SupportDataDrivenLensFlare = true;
+        [SerializeField] bool m_SupportScreenSpaceLensFlare = true;
 
         // Deprecated settings
         [SerializeField] ShadowQuality m_ShadowType = ShadowQuality.HardShadows;
@@ -558,6 +580,8 @@ namespace UnityEngine.Rendering.Universal
 
         [SerializeField] VolumeFrameworkUpdateMode m_VolumeFrameworkUpdateMode = VolumeFrameworkUpdateMode.EveryFrame;
 
+        [SerializeField] VolumeProfile m_VolumeProfile;
+
         [SerializeField] TextureResources m_Textures;
 
         // Note: A lut size of 16^3 is barely usable with the HDR grading mode. 32 should be the
@@ -565,12 +589,12 @@ namespace UnityEngine.Rendering.Universal
         // 1D shaper lut but for now we'll keep it simple.
 
         /// <summary>
-        /// The minimum size of the color grading LUT.
+        /// The minimum color grading LUT (lookup table) size.
         /// </summary>
         public const int k_MinLutSize = 16;
 
         /// <summary>
-        /// The maximum size of the color grading LUT.
+        /// The maximum color grading LUT (lookup table) size.
         /// </summary>
         public const int k_MaxLutSize = 65;
 
@@ -578,19 +602,29 @@ namespace UnityEngine.Rendering.Universal
         internal const int k_ShadowCascadeMaxCount = 4;
 
         /// <summary>
-        /// The default value of `additionalLightsShadowResolutionTierLow`.
+        /// The default low tier resolution for additional lights shadow texture.
         /// </summary>
         public static readonly int AdditionalLightsDefaultShadowResolutionTierLow = 256;
 
         /// <summary>
-        /// The default value of `additionalLightsShadowResolutionTierMedium`.
+        /// The default medium tier resolution for additional lights shadow texture.
         /// </summary>
         public static readonly int AdditionalLightsDefaultShadowResolutionTierMedium = 512;
 
         /// <summary>
-        /// The default value of `additionalLightsShadowResolutionTierHigh`.
+        /// The default high tier resolution for additional lights shadow texture.
         /// </summary>
         public static readonly int AdditionalLightsDefaultShadowResolutionTierHigh = 1024;
+
+        /// <summary>
+        /// The list of renderer data used by this pipeline asset.
+        /// </summary>
+        public ReadOnlySpan<ScriptableRendererData> rendererDataList => m_RendererDataList;
+
+        /// <summary>
+        /// The list of renderers used by this pipeline asset.
+        /// </summary>
+        public ReadOnlySpan<ScriptableRenderer> renderers => m_Renderers;
 
 #if UNITY_EDITOR
         [NonSerialized]
@@ -661,14 +695,6 @@ namespace UnityEngine.Rendering.Universal
                     rendererData.postProcessData = PostProcessData.GetDefaultPostProcessData();
                     return rendererData;
                 }
-                // 2D renderer is experimental
-                case RendererType._2DRenderer:
-                {
-                    var rendererData = CreateInstance<Renderer2DData>();
-                    rendererData.postProcessData = PostProcessData.GetDefaultPostProcessData();
-                    return rendererData;
-                    // Universal Renderer is the fallback renderer that works on all platforms
-                }
             }
         }
 
@@ -710,6 +736,18 @@ namespace UnityEngine.Rendering.Universal
 #else
             m_RendererDataList[0] = null;
             return m_RendererDataList[0];
+#endif
+        }
+
+        /// <summary>
+        /// Ensures Global Settings are ready and registered into GraphicsSettings
+        /// </summary>
+        protected override void EnsureGlobalSettings()
+        {
+            base.EnsureGlobalSettings();
+
+#if UNITY_EDITOR
+            UniversalRenderPipelineGlobalSettings.Ensure();
 #endif
         }
 
@@ -965,7 +1003,7 @@ namespace UnityEngine.Rendering.Universal
                 GraphicsFormat result = GraphicsFormat.None;
                 foreach (var format in s_LightCookieFormatList[(int)m_AdditionalLightsCookieFormat])
                 {
-                    if (SystemInfo.IsFormatSupported(format, FormatUsage.Render))
+                    if (SystemInfo.IsFormatSupported(format, GraphicsFormatUsage.Render))
                     {
                         result = format;
                         break;
@@ -1068,7 +1106,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Specifies the msaa sample count used by this <c>UniversalRenderPipelineAsset</c>
         /// </summary>
-        /// <see cref="SampleCount"/>
+        /// <see cref="MsaaQuality"/>
         public int msaaSampleCount
         {
             get { return (int)m_MSAA; }
@@ -1140,6 +1178,42 @@ namespace UnityEngine.Rendering.Universal
         {
             get { return m_ShEvalMode; }
             internal set { m_ShEvalMode = value; }
+        }
+
+        /// <summary>
+        /// Determines what system to use.
+        /// </summary>
+        public LightProbeSystem lightProbeSystem
+        {
+            get { return m_LightProbeSystem; }
+            internal set { m_LightProbeSystem = value; }
+        }
+
+        /// <summary>
+        /// Probe Volume Memory Budget.
+        /// </summary>
+        public ProbeVolumeTextureMemoryBudget probeVolumeMemoryBudget
+        {
+            get { return m_ProbeVolumeMemoryBudget; }
+            internal set { m_ProbeVolumeMemoryBudget = value; }
+        }
+
+        /// <summary>
+        /// Support Streaming for Probe Volumes.
+        /// </summary>
+        public bool supportProbeVolumeStreaming
+        {
+            get { return m_SupportProbeVolumeStreaming; }
+            internal set { m_SupportProbeVolumeStreaming = value; }
+        }
+
+        /// <summary>
+        /// Probe Volumes SH Bands.
+        /// </summary>
+        public ProbeVolumeSHBands probeVolumeSHBands
+        {
+            get { return m_ProbeVolumeSHBands; }
+            internal set { m_ProbeVolumeSHBands = value; }
         }
 
         /// <summary>
@@ -1406,7 +1480,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Returns true if the Render Pipeline Asset supports light layers, false otherwise.
         /// </summary>
-        [Obsolete("This is obsolete, UnityEngine.Rendering.ShaderVariantLogLevel instead.", false)]
+        [Obsolete("This is obsolete, UnityEngine.Rendering.ShaderVariantLogLevel instead.", true)]
         public bool supportsLightLayers
         {
             get { return m_SupportsLightLayers; }
@@ -1426,9 +1500,19 @@ namespace UnityEngine.Rendering.Universal
         public VolumeFrameworkUpdateMode volumeFrameworkUpdateMode => m_VolumeFrameworkUpdateMode;
 
         /// <summary>
+        /// A volume profile that can be used to override global default volume profile values. This provides a way e.g.
+        /// to have different volume default values per quality level without having to place global volumes in scenes.
+        /// </summary>
+        public VolumeProfile volumeProfile
+        {
+            get => m_VolumeProfile;
+            set => m_VolumeProfile = value;
+        }
+
+        /// <summary>
         /// Previously returned the debug level for this Render Pipeline Asset but is now deprecated. Replaced to use the profiler and is no longer used.
         /// </summary>
-        [Obsolete("PipelineDebugLevel is deprecated and replaced to use the profiler. Calling debugLevel is not necessary.", false)]
+        [Obsolete("PipelineDebugLevel is deprecated and replaced to use the profiler. Calling debugLevel is not necessary.", true)]
         public PipelineDebugLevel debugLevel
         {
             get => PipelineDebugLevel.Disabled;
@@ -1447,7 +1531,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Controls whether the RenderGraph render path is enabled.
         /// </summary>
-        internal bool enableRenderGraph
+        public bool enableRenderGraph
         {
             get { return m_EnableRenderGraph; }
             set { m_EnableRenderGraph = value; }
@@ -1478,6 +1562,14 @@ namespace UnityEngine.Rendering.Universal
         public bool useFastSRGBLinearConversion
         {
             get { return m_UseFastSRGBLinearConversion; }
+        }
+        
+        /// <summary>
+        /// Returns true if Screen Space Lens Flare are supported by this asset, false otherwise.
+        /// </summary>
+        public bool supportScreenSpaceLensFlare
+        {
+            get { return m_SupportScreenSpaceLensFlare; }
         }
         
         /// <summary>
@@ -1728,7 +1820,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Names used for display of light layers.
         /// </summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", true)]
         public string[] lightLayerMaskNames => new string[0];
 
         /// <summary>
@@ -1853,6 +1945,12 @@ namespace UnityEngine.Rendering.Universal
                 k_AssetVersion = 11;
             }
 
+            if (k_AssetVersion < 12)
+            {
+                k_AssetPreviousVersion = k_AssetVersion;
+                k_AssetVersion = 12;
+            }
+
 #if UNITY_EDITOR
             if (k_AssetPreviousVersion != k_AssetVersion)
             {
@@ -1899,12 +1997,22 @@ namespace UnityEngine.Rendering.Universal
                 asset.k_AssetPreviousVersion = 10;
             }
 
-            if(asset.k_AssetPreviousVersion < 11)
+            if (asset.k_AssetPreviousVersion < 11)
             {
-                ResourceReloader.ReloadAllNullIn(asset, packagePath);
                 asset.k_AssetPreviousVersion = 11;
             }
 
+            if (asset.k_AssetPreviousVersion < 12)
+            {
+                var globalSettings = UniversalRenderPipelineGlobalSettings.Ensure();
+#pragma warning disable CS0618 // Type or member is obsolete
+                if (asset.apvScenesData != null)
+                    globalSettings.apvScenesData = asset.apvScenesData;
+#pragma warning restore CS0618 // Type or member is obsolete
+                asset.k_AssetPreviousVersion = 12;
+            }
+
+            ResourceReloader.ReloadAllNullIn(asset, packagePath);
             EditorUtility.SetDirty(asset);
         }
 
@@ -1946,6 +2054,11 @@ namespace UnityEngine.Rendering.Universal
             return index < m_RendererDataList.Length ? m_RendererDataList[index] != null : false;
         }
 
+        #region APV
+        [SerializeField, Obsolete("Kept for migration. #from(2023.3")]
+        internal ProbeVolumeSceneData apvScenesData;
+        #endregion
+
         /// <summary>
         /// Class containing texture resources used in URP.
         /// </summary>
@@ -1971,6 +2084,31 @@ namespace UnityEngine.Rendering.Universal
             public bool NeedsReload()
             {
                 return blueNoise64LTex == null || bayerMatrixTex == null;
+            }
+        }
+
+        /// <summary>
+        /// Indicates the maximum number of SH Bands used by this render pipeline instance.
+        /// </summary>
+        public ProbeVolumeSHBands maxSHBands
+        {
+            get
+            {
+                if (lightProbeSystem == LightProbeSystem.ProbeVolumes)
+                    return probeVolumeSHBands;
+                else
+                    return ProbeVolumeSHBands.SphericalHarmonicsL1;
+            }
+        }
+
+        /// <summary>
+        /// Returns the projects global ProbeVolumeSceneData instance.
+        /// </summary>
+        public ProbeVolumeSceneData probeVolumeSceneData
+        {
+            get
+            {
+                return UniversalRenderPipelineGlobalSettings.instance?.apvScenesData;
             }
         }
     }

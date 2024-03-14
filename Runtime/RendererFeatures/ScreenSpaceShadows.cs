@@ -1,5 +1,6 @@
 using System;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -14,7 +15,6 @@ namespace UnityEngine.Rendering.Universal
     internal class ScreenSpaceShadows : ScriptableRendererFeature
     {
 #if UNITY_EDITOR
-        [UnityEditor.ShaderKeywordFilter.ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.OpenGLES2)]
         [UnityEditor.ShaderKeywordFilter.SelectIf(true, keywordNames: ShaderKeywordStrings.MainLightShadowScreen)]
         private const bool k_RequiresScreenSpaceShadowsKeyword = true;
 #endif
@@ -111,10 +111,14 @@ namespace UnityEngine.Rendering.Universal
             private Material m_Material;
             private ScreenSpaceShadowsSettings m_CurrentSettings;
             private RTHandle m_RenderTarget;
+            private int m_ScreenSpaceShadowmapTextureID;
+            private PassData m_PassData;
 
             internal ScreenSpaceShadowsPass()
             {
                 m_CurrentSettings = new ScreenSpaceShadowsSettings();
+                m_ScreenSpaceShadowmapTextureID = Shader.PropertyToID("_ScreenSpaceShadowmapTexture");
+                m_PassData = new PassData();
             }
 
             public void Dispose()
@@ -137,7 +141,9 @@ namespace UnityEngine.Rendering.Universal
                 var desc = renderingData.cameraData.cameraTargetDescriptor;
                 desc.depthBufferBits = 0;
                 desc.msaaSamples = 1;
-                desc.graphicsFormat = RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.R8_UNorm, FormatUsage.Linear | FormatUsage.Render)
+                // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+                // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+                desc.graphicsFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Blend)
                     ? GraphicsFormat.R8_UNorm
                     : GraphicsFormat.B8G8R8A8_UNorm;
 
@@ -146,6 +152,67 @@ namespace UnityEngine.Rendering.Universal
 
                 ConfigureTarget(m_RenderTarget);
                 ConfigureClear(ClearFlag.None, Color.white);
+            }
+
+            private class PassData
+            {
+                internal TextureHandle target;
+                internal RenderingData renderingData;
+                internal Material material;
+                internal int shadowmapID;
+            }
+
+            /// <summary>
+            /// Initialize the shared pass data.
+            /// </summary>
+            /// <param name="passData"></param>
+            private void InitPassData(ref RenderingData renderingData, ref PassData passData)
+            {
+                passData.renderingData = renderingData;
+                passData.material = m_Material;
+                passData.shadowmapID = m_ScreenSpaceShadowmapTextureID;
+            }
+
+            public override void RecordRenderGraph(RenderGraph renderGraph, FrameResources frameResources, ref RenderingData renderingData)
+            {
+                if (m_Material == null)
+                {
+                    Debug.LogErrorFormat("{0}.Execute(): Missing material. ScreenSpaceShadows pass will not execute. Check for missing reference in the renderer resources.", GetType().Name);
+                    return;
+                }
+
+                var desc = renderingData.cameraData.cameraTargetDescriptor;
+                desc.depthBufferBits = 0;
+                desc.msaaSamples = 1;
+                // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+                // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+                desc.graphicsFormat = SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Blend)
+                    ? GraphicsFormat.R8_UNorm
+                    : GraphicsFormat.B8G8R8A8_UNorm;
+                TextureHandle color = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, "_ScreenSpaceShadowmapTexture", true);
+
+                using (var builder = renderGraph.AddRasterRenderPass<PassData>("Screen Space Shadows Pass", out var passData, m_ProfilingSampler))
+                {
+                    passData.target = builder.UseTextureFragment(color, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+
+                    InitPassData(ref renderingData, ref passData);
+                    builder.AllowGlobalStateModification(true);
+
+                    builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
+                    {
+                        ExecutePass(rgContext.cmd, data, data.target, ref data.renderingData);
+                    });
+                }
+
+                RenderGraphUtils.SetGlobalTexture(renderGraph, m_ScreenSpaceShadowmapTextureID, color);
+            }
+
+            private static void ExecutePass(RasterCommandBuffer cmd, PassData data, RTHandle target, ref RenderingData renderingData)
+            {
+                Blitter.BlitTexture(cmd, target, Vector2.one, data.material, 0);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, false);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, false);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, true);
             }
 
             /// <inheritdoc/>
@@ -157,15 +224,11 @@ namespace UnityEngine.Rendering.Universal
                     return;
                 }
 
-                Camera camera = renderingData.cameraData.camera;
-
+                InitPassData(ref renderingData, ref m_PassData);
                 var cmd = renderingData.commandBuffer;
                 using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
-                    Blitter.BlitCameraTexture(cmd, m_RenderTarget, m_RenderTarget, m_Material, 0);
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, false);
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, false);
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, true);
+                    ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, m_RenderTarget, ref renderingData);
                 }
             }
         }
@@ -182,23 +245,53 @@ namespace UnityEngine.Rendering.Universal
                 ConfigureTarget(k_CurrentActive);
             }
 
+
+            private static void ExecutePass(RasterCommandBuffer cmd, ref RenderingData renderingData)
+            {
+                ShadowData shadowData = renderingData.shadowData;
+                int cascadesCount = shadowData.mainLightShadowCascadesCount;
+                bool mainLightShadows = renderingData.shadowData.supportsMainLightShadows;
+                bool receiveShadowsNoCascade = mainLightShadows && cascadesCount == 1;
+                bool receiveShadowsCascades = mainLightShadows && cascadesCount > 1;
+
+                // Before transparent object pass, force to disable screen space shadow of main light
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, false);
+
+                // then enable main light shadows with or without cascades
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, receiveShadowsNoCascade);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, receiveShadowsCascades);
+            }
+
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
                 var cmd = renderingData.commandBuffer;
                 using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
-                    ShadowData shadowData = renderingData.shadowData;
-                    int cascadesCount = shadowData.mainLightShadowCascadesCount;
-                    bool mainLightShadows = renderingData.shadowData.supportsMainLightShadows;
-                    bool receiveShadowsNoCascade = mainLightShadows && cascadesCount == 1;
-                    bool receiveShadowsCascades = mainLightShadows && cascadesCount > 1;
+                    ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), ref renderingData);
+                }
+            }
 
-                    // Before transparent object pass, force to disable screen space shadow of main light
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, false);
+            internal class PassData
+            {
+                internal ScreenSpaceShadowsPostPass pass;
+                internal RenderingData renderingData;
+            }
+            public override void RecordRenderGraph(RenderGraph renderGraph, FrameResources frameResources, ref RenderingData renderingData)
+            {
+                using (var builder = renderGraph.AddRasterRenderPass<PassData>("Screen Space Shadow Post Pass", out var passData, m_ProfilingSampler))
+                {
+                    UniversalRenderer renderer = (UniversalRenderer) renderingData.cameraData.renderer;
+                    TextureHandle color = renderer.activeColorTexture;
+                    builder.UseTextureFragment(color, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+                    passData.renderingData = renderingData;
+                    passData.pass = this;
 
-                    // then enable main light shadows with or without cascades
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, receiveShadowsNoCascade);
-                    CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, receiveShadowsCascades);
+                    builder.AllowGlobalStateModification(true);
+
+                    builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
+                    {
+                        ExecutePass(rgContext.cmd, ref data.renderingData);
+                    });
                 }
             }
         }

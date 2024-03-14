@@ -48,6 +48,7 @@ Varyings VertQuad(Attributes input)
 
 float4 FragBilinear(Varyings input) : SV_Target
 {
+
     float4 outColor;
     float2 uv = input.texcoord.xy;
 

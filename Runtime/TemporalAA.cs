@@ -53,7 +53,7 @@ namespace UnityEngine.Rendering.Universal
                 RenderTextureDescriptor desc = new RenderTextureDescriptor();
 
                 const bool enableRandomWrite = false; // aka UAV, Load/Store
-                FormatUsage usage = enableRandomWrite ? FormatUsage.LoadStore : FormatUsage.Render;
+                GraphicsFormatUsage usage = enableRandomWrite ? GraphicsFormatUsage.LoadStore : GraphicsFormatUsage.Render;
 
                 desc.width = sizeX;
                 desc.height = sizeY;
@@ -77,7 +77,7 @@ namespace UnityEngine.Rendering.Universal
                 DeallocateTargets();
             }
 
-            GraphicsFormat CheckFormat(GraphicsFormat format, FormatUsage usage)
+            GraphicsFormat CheckFormat(GraphicsFormat format, GraphicsFormatUsage usage)
             {
                 // Should do query per usage, but we rely on the fact that "LoadStore" implies "Render" in the code.
                 bool success = SystemInfo.IsFormatSupported(format, usage);
@@ -86,7 +86,7 @@ namespace UnityEngine.Rendering.Universal
                 return format;
             }
 
-            GraphicsFormat FindFormat( FormatUsage usage )
+            GraphicsFormat FindFormat( GraphicsFormatUsage usage )
             {
                 for (int i = 0; i < formatList.Length; i++)
                     if (SystemInfo.IsFormatSupported(formatList[i], usage))
@@ -300,7 +300,7 @@ namespace UnityEngine.Rendering.Universal
             const int warningThrottleFrames = 60 * 1; // 60 FPS * 1 sec
             if(Time.frameCount % warningThrottleFrames == 0)
                 Debug.LogWarning(warning);
-            
+
             return warning;
         }
 
@@ -403,13 +403,13 @@ namespace UnityEngine.Rendering.Universal
             // either this frame (again) or the next frame correctly, but it would cost more memory.
             TextureHandle activeMotionVectors = isNewFrame ? srcMotionVectors : renderGraph.defaultResources.blackTexture;
 
-            using (var builder = renderGraph.AddRenderPass<TaaPassData>("Temporal Anti-aliasing", out var passData, ProfilingSampler.Get(URPProfileId.TemporalAA)))
+            using (var builder = renderGraph.AddRasterRenderPass<TaaPassData>("Temporal Anti-aliasing", out var passData, ProfilingSampler.Get(URPProfileId.RG_TAA)))
             {
-                passData.dstTex = builder.UseColorBuffer(dstColor, 0);
-                passData.srcColorTex = builder.ReadTexture(srcColor);
-                passData.srcDepthTex = builder.ReadTexture(srcDepth);
-                passData.srcMotionVectorTex = builder.ReadTexture(activeMotionVectors);
-                passData.srcTaaAccumTex = builder.ReadTexture(srcAccumulation);
+                passData.dstTex = builder.UseTextureFragment(dstColor, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+                passData.srcColorTex = builder.UseTexture(srcColor, IBaseRenderGraphBuilder.AccessFlags.Read);
+                passData.srcDepthTex = builder.UseTexture(srcDepth, IBaseRenderGraphBuilder.AccessFlags.Read);
+                passData.srcMotionVectorTex = builder.UseTexture(activeMotionVectors, IBaseRenderGraphBuilder.AccessFlags.Read);
+                passData.srcTaaAccumTex = builder.UseTexture(srcAccumulation, IBaseRenderGraphBuilder.AccessFlags.Read);
 
                 passData.material = taaMaterial;
                 passData.passIndex = (int)taa.quality;
@@ -435,7 +435,7 @@ namespace UnityEngine.Rendering.Universal
                         break;
                 }
 
-                builder.SetRenderFunc((TaaPassData data, RenderGraphContext context) =>
+                builder.SetRenderFunc(static (TaaPassData data, RasterGraphContext context) =>
                 {
                     data.material.SetFloat(ShaderConstants._TaaFrameInfluence, data.taaFrameInfluence);
                     data.material.SetFloat(ShaderConstants._TaaVarianceClampScale, data.taaVarianceClampScale);
@@ -454,16 +454,18 @@ namespace UnityEngine.Rendering.Universal
             if (isNewFrame)
             {
                 int kHistoryCopyPass = taaMaterial.shader.passCount - 1;
-                using (var builder = renderGraph.AddRenderPass<TaaPassData>("Temporal Anti-aliasing Copy History", out var passData, new ProfilingSampler("TemporalAAHistoryCopy")))
+                using (var builder = renderGraph.AddRasterRenderPass<TaaPassData>("Temporal Anti-aliasing Copy History", out var passData, ProfilingSampler.Get(URPProfileId.RG_TAACopyHistory)))
                 {
-                    passData.dstTex = builder.UseColorBuffer(srcAccumulation, 0);
-                    passData.srcColorTex = builder.ReadTexture(dstColor);   // Resolved color is the new history
+                    passData.dstTex = builder.UseTextureFragment(srcAccumulation, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+                    passData.srcColorTex = builder.UseTexture(dstColor, IBaseRenderGraphBuilder.AccessFlags.Read);   // Resolved color is the new history
 
                     passData.material = taaMaterial;
                     passData.passIndex = kHistoryCopyPass;
 
-                    builder.SetRenderFunc((TaaPassData data, RenderGraphContext context) => { Blitter.BlitTexture(context.cmd, data.srcColorTex, Vector2.one, data.material, data.passIndex); });
+                    builder.SetRenderFunc((TaaPassData data, RasterGraphContext context) => { Blitter.BlitTexture(context.cmd, data.srcColorTex, Vector2.one, data.material, data.passIndex); });
                 }
+
+                cameraData.taaPersistentData.SetLastAccumFrameIndex(multipassId, Time.frameCount);
             }
         }
     }

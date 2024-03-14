@@ -141,7 +141,23 @@ namespace UnityEditor.Rendering.Universal
             var rect = EditorGUILayout.GetControlRect();
             EditorGUI.BeginProperty(rect, Styles.Type, serializedLight.settings.lightType);
             EditorGUI.BeginChangeCheck();
-            int type = EditorGUI.IntPopup(rect, Styles.Type, selectedLightType, Styles.LightTypeTitles, Styles.LightTypeValues);
+            int type;
+            if (Styles.LightTypeValues.Contains(selectedLightType))
+            {
+                // ^ The currently selected light type is supported in the
+                // current pipeline.
+                type = EditorGUI.IntPopup(rect, Styles.Type, selectedLightType, Styles.LightTypeTitles, Styles.LightTypeValues);
+            }
+            else
+            {
+                // ^ The currently selected light type is not supported in
+                // the current pipeline. Add it to the dropdown, since it
+                // would show up as a blank entry.
+                string currentTitle = ((LightType)selectedLightType).ToString();
+                GUIContent[] titles = Styles.LightTypeTitles.Append(EditorGUIUtility.TrTextContent(currentTitle)).ToArray();
+                int[] values = Styles.LightTypeValues.Append(selectedLightType).ToArray();
+                type = EditorGUI.IntPopup(rect, Styles.Type, selectedLightType, titles, values);
+            }
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -149,6 +165,14 @@ namespace UnityEditor.Rendering.Universal
                 serializedLight.settings.lightType.intValue = type;
             }
             EditorGUI.EndProperty();
+
+            if (!Styles.LightTypeValues.Contains(type))
+            {
+                EditorGUILayout.HelpBox(
+                    "This light type is not supported in the current active render pipeline. Change the light type or the active Render Pipeline to use this light.",
+                    MessageType.Info
+                );
+            }
 
             Light light = serializedLight.settings.light;
             var lightType = light.type;
@@ -166,17 +190,6 @@ namespace UnityEditor.Rendering.Universal
                 {
                     serializedLight.settings.lightmapping.intValue = (int)LightmapBakeType.Baked;
                     serializedLight.Apply();
-                }
-
-                if (lightType != LightType.Rectangle && !serializedLight.settings.isCompletelyBaked && UniversalRenderPipeline.asset.useRenderingLayers && !isInPreset)
-                {
-                    EditorGUI.BeginChangeCheck();
-                    EditorUtils.DrawRenderingLayerMask(serializedLight.renderingLayers, Styles.RenderingLayers);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        if (!serializedLight.customShadowLayers.boolValue)
-                            SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
-                    }
                 }
             }
         }
@@ -256,7 +269,49 @@ namespace UnityEditor.Rendering.Universal
         {
             serializedLight.settings.DrawRenderMode();
 
-            EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, Styles.CullingMask);
+            if (serializedLight.settings.light.type != LightType.Rectangle &&
+                !serializedLight.settings.isCompletelyBaked)
+            {
+                EditorGUI.BeginChangeCheck();
+                GUI.enabled = UniversalRenderPipeline.asset.useRenderingLayers;
+                EditorUtils.DrawRenderingLayerMask(
+                    serializedLight.renderingLayers,
+                    UniversalRenderPipeline.asset.useRenderingLayers ? Styles.RenderingLayers : Styles.RenderingLayersDisabled
+                );
+                GUI.enabled = true;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    if (!serializedLight.customShadowLayers.boolValue)
+                        SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
+                }
+            }
+
+            var rendererList = UniversalRenderPipeline.asset.rendererDataList;
+            bool hasNonForwardPlusRenderer = false;
+            foreach (var r in rendererList)
+            {
+                if (r is UniversalRendererData ur)
+                {
+                    if (ur.renderingMode != RenderingMode.ForwardPlus)
+                    {
+                        hasNonForwardPlusRenderer = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    hasNonForwardPlusRenderer = true;
+                    break;
+                }
+            }
+
+            GUI.enabled = hasNonForwardPlusRenderer;
+            EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, hasNonForwardPlusRenderer ? Styles.CullingMask : Styles.CullingMaskDisabled);
+            GUI.enabled = true;
+            if (serializedLight.settings.cullingMask.intValue != -1)
+            {
+                EditorGUILayout.HelpBox(Styles.CullingMaskWarning.text, MessageType.Warning);
+            }
         }
 
         static void DrawShadowsContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)

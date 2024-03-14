@@ -47,7 +47,9 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_LutBuilderHdr = Load(data.shaders.lutBuilderHdrPS);
 
             // Warm up lut format as IsFormatSupported adds GC pressure...
-            const FormatUsage kFlags = FormatUsage.Linear | FormatUsage.Render;
+            // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+            // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+            const GraphicsFormatUsage kFlags = GraphicsFormatUsage.Blend;
             if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, kFlags))
                 m_HdrLutFormat = GraphicsFormat.R16G16B16A16_SFloat;
             else if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, kFlags))
@@ -111,7 +113,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 #endif
 
             CoreUtils.SetRenderTarget(renderingData.commandBuffer, m_InternalLut, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, ClearFlag.None, Color.clear);
-            ExecutePass(context, m_PassData, ref renderingData, m_InternalLut);
+            ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, ref renderingData, m_InternalLut);
         }
 
         private class PassData
@@ -123,9 +125,8 @@ namespace UnityEngine.Rendering.Universal.Internal
             internal TextureHandle internalLut;
         }
 
-        private static void ExecutePass(ScriptableRenderContext context, PassData passData, ref RenderingData renderingData, RTHandle internalLutTarget)
+        private static void ExecutePass(RasterCommandBuffer cmd, PassData passData, ref RenderingData renderingData, RTHandle internalLutTarget)
         {
-            var cmd = renderingData.commandBuffer;
             var lutBuilderLdr = passData.lutBuilderLdr;
             var lutBuilderHdr = passData.lutBuilderHdr;
             var allowColorGradingACESHDR = passData.allowColorGradingACESHDR;
@@ -247,12 +248,8 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 cameraData.xr.StopSinglePass(cmd);
 
-
-                if (cameraData.xr.supportsFoveatedRendering)
-                    cmd.SetFoveatedRenderingMode(FoveatedRenderingMode.Disabled);
-
-                // Render the lut
-                Blitter.BlitCameraTexture(cmd, internalLutTarget, internalLutTarget, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, material, 0);
+                // Render the lut.
+                Blitter.BlitTexture(cmd, internalLutTarget, Vector2.one, material, 0);
 
                 cameraData.xr.StartSinglePass(cmd);
             }
@@ -260,12 +257,12 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         internal void Render(RenderGraph renderGraph, out TextureHandle internalColorLut, ref RenderingData renderingData)
         {
-            using (var builder = renderGraph.AddRenderPass<PassData>("Color Lut Pass", out var passData, base.profilingSampler))
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Color Lut Pass", out var passData, base.profilingSampler))
             {
                 this.ConfigureDescriptor(in renderingData.postProcessingData, out var lutDesc, out var filterMode);
                 internalColorLut = UniversalRenderer.CreateRenderGraphTexture(renderGraph, lutDesc, "_InternalGradingLut", true);
 
-                passData.internalLut = builder.UseColorBuffer(internalColorLut, 0);
+                passData.internalLut = builder.UseTextureFragment(internalColorLut, 0, IBaseRenderGraphBuilder.AccessFlags.WriteAll);
                 passData.lutBuilderLdr = m_LutBuilderLdr;
                 passData.lutBuilderHdr = m_LutBuilderHdr;
                 passData.renderingData = renderingData;
@@ -274,9 +271,9 @@ namespace UnityEngine.Rendering.Universal.Internal
                 //  TODO RENDERGRAPH: culling? force culling off for testing
                 builder.AllowPassCulling(false);
 
-                builder.SetRenderFunc((PassData data, RenderGraphContext context) =>
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
-                    ExecutePass(context.renderContext, data, ref data.renderingData, data.internalLut);
+                    ExecutePass(context.cmd, data, ref data.renderingData, data.internalLut);
                 });
 
                 return;

@@ -11,7 +11,7 @@
     #define UNITY_STEREO_MULTIVIEW_ENABLED
 #endif
 
-#if defined(UNITY_SINGLE_PASS_STEREO) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
 #define USING_STEREO_MATRICES
 #endif
 
@@ -42,6 +42,7 @@ float4 _SinTime; // sin(t/8), sin(t/4), sin(t/2), sin(t)
 float4 _CosTime; // cos(t/8), cos(t/4), cos(t/2), cos(t)
 float4 unity_DeltaTime; // dt, 1/dt, smoothdt, 1/smoothdt
 float4 _TimeParameters; // t, sin(t), cos(t)
+float4 _LastTimeParameters; // t, sin(t), cos(t)
 
 #if !defined(USING_STEREO_MATRICES)
 float3 _WorldSpaceCameraPos;
@@ -83,6 +84,9 @@ float4 unity_OrthoParams;
 // scaleBias.w = unused
 uniform float4 _ScaleBias;
 uniform float4 _ScaleBiasRt;
+
+// { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
+uniform float4 _RTHandleScale;
 
 float4 unity_CameraWorldClipPlanes[6];
 
@@ -156,6 +160,14 @@ float4x4 unity_MatrixPreviousMI;
 //Z : Z bias value
 //W : Camera only
 float4 unity_MotionVectorsParams;
+
+// Sprite.
+float4 unity_SpriteColor;
+//X : FlipX
+//Y : FlipY
+//Z : Reserved for future use.
+//W : Reserved for future use.
+float4 unity_SpriteProps;
 CBUFFER_END
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
@@ -173,7 +185,6 @@ float4x4 unity_StereoCameraProjection[2];
 float4x4 unity_StereoCameraInvProjection[2];
 
 float3   unity_StereoWorldSpaceCameraPos[2];
-float4   unity_StereoScaleOffset[2];
 CBUFFER_END
 #endif
 
@@ -191,10 +202,6 @@ CBUFFER_END
 UNITY_DECLARE_MULTIVIEW(2);
 #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
 static uint unity_StereoEyeIndex;
-#elif defined(UNITY_SINGLE_PASS_STEREO)
-CBUFFER_START(UnityStereoEyeIndex)
-int unity_StereoEyeIndex;
-CBUFFER_END
 #endif
 
 float4x4 glstate_matrix_transpose_modelview0;

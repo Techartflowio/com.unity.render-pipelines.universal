@@ -1,16 +1,13 @@
 {
   "name": "com.unity.render-pipelines.universal",
   "description": "The Universal Render Pipeline (URP) is a prebuilt Scriptable Render Pipeline, made by Unity. URP provides artist-friendly workflows that let you quickly and easily create optimized graphics across a range of platforms, from mobile to high-end consoles and PCs.",
-  "version": "14.0.10",
-  "unity": "2022.3",
-  "displayName": "TAFIO Universal RP",
+  "version": "16.0.5",
+  "unity": "2023.2",
   "dependencies": {
     "com.unity.mathematics": "1.2.1",
     "com.unity.burst": "1.8.9",
-    "com.unity.render-pipelines.core": "14.0.10",
-    "com.unity.shadergraph": "14.0.10",
-    "com.unity.render-pipelines.universal-config": "14.0.9",
-    "com.unity.test-framework": "1.1.33"
+    "com.unity.render-pipelines.core": "16.0.5",
+    "com.unity.shadergraph": "16.0.5"
   },
   "keywords": [
     "graphics",
@@ -26,5 +23,6 @@
       "description": "Collection of scenes showcasing different features of the Universal Render Pipeline.",
       "path": "Samples~/URPPackageSamples"
     }
-  ]
+  ],
+  "_fingerprint": "bd4f6d81ee2728ddeb1a3a40251d2301baa5faa2"
 }

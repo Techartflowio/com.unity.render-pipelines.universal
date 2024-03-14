@@ -31,11 +31,11 @@ In order to configure these settings effectively, you need to understand how cer
 
 To properly make use of the capabilities of HDR displays, your **Tonemapping** configuration must take into account the capabilities of the target display, specifically these three values (in nits):
 
-- **Minimum supported brightness**.
-- **Maximum supported brightness**.
-- **Paper White value**: This value represents the brightness of a paper-white surface represented on the display, which determines the display's brightness overall.
+* **Minimum supported brightness**.
+* **Maximum supported brightness**.
+* **Paper White value**: This value represents the brightness of a paper-white surface represented on the display, which determines the display's brightness overall.
 
-**Note**: Low Dynamic Range (LDR) and High Dynamic Range (HDR) content do not appear equally bright on displays with the same Paper White value. This is because displays apply extra processing to low dynamic range content that bumps its brightness levels up. For this reason, it is best practice to implement a calibration menu for your application.
+> **Note**: Low Dynamic Range (LDR) and High Dynamic Range (HDR) content do not appear equally bright on displays with the same Paper White value. This is because displays apply extra processing to low dynamic range content that bumps its brightness levels up. For this reason, it is best practice to implement a calibration menu for your application.
 
 ### Usable user interfaces depend on accurate Paper White values
 
@@ -47,7 +47,7 @@ As a result, Paper White values determine the brightness of UI elements in HDR m
 
 ## Configure HDR Tone Mapping settings
 
-You can select and adjust Tonemapping modes in the [Volume](./../Volumes.md) component settings. You can also adjust some aspects of your HDR Tonemapping configuration with a script (see the [HDROutputSettings API](#the-hdroutputsettings-api)).
+You can select and adjust tone mapping modes in the [Volume](./../Volumes.md) component settings. You can also adjust some aspects of your HDR tone mapping configuration with a script. For more information on this, refer to the [HDROutputSettings API](#the-hdroutputsettings-api).
 
 After you enable **Allow HDR Display Output**, HDR Tonemapping options become visible in the Volume component.
 
@@ -55,8 +55,8 @@ After you enable **Allow HDR Display Output**, HDR Tonemapping options become vi
 
 URP provides two **Tonemapping** modes: **Neutral** and **ACES**. Each Tonemapping mode has some unique properties.
 
-- **Neutral** mode is especially suitable for situations where you do not want the tone mapper to color grade your content.
-- **ACES** mode uses the ACES reference color space for feature films. It produces a cinematic, contrasty result.
+* **Neutral** mode is especially suitable for situations where you do not want the tone mapper to color grade your content.
+* **ACES** mode uses the ACES reference color space for feature films. It produces a cinematic, contrasty result.
 
 ### Neutral
 
@@ -72,9 +72,9 @@ URP provides two **Tonemapping** modes: **Neutral** and **ACES**. Each Tonemappi
 
 ### Misuse of Hue Shift Amount
 
-Creators might author some content with the intention to use **Hue Shift Amount** to produce special effects. In the illustration below, the **Hue Shift Amount** is 0 for Image A and 1 for Image B. The flames image B appear more intense because of the hue shift effect. It is preferable not to author content in this way, because settings optimized for special effects can have undesirable effects on other content in the Scene.
+Creators might author some content with the intention to use **Hue Shift Amount** to produce special effects. In the illustration below, the **Hue Shift Amount** is 0 for Image A and 1 for Image B. The flames image B appear more intense because of the hue shift effect. It is preferable not to author content in this way, because settings optimized for special effects can have undesirable effects on other content in the scene.
 
-![Hue Shift Amount Comparison](./../Images/post-proc/hdr/HDR-Output-HueShift.png)</br>*Image A: Output when Hue Shift Amount is 0.*</br>*Image B: Output when Hue Shift Amount is 1.*
+![Hue Shift Amount Comparison](./../Images/post-proc/hdr/HDR-Output-HueShift.png)<br/>*Image A: Output when Hue Shift Amount is 0.*<br/>*Image B: Output when Hue Shift Amount is 1.*
 
 ### ACES
 
@@ -133,15 +133,18 @@ This debug view indicates the relationship between scene values and specific col
 
 ![Values Exceeding Paper White Debug View](./../Images/post-proc/hdr/HDR-Output-OverPaperWhite.png)
 
-This debug view uses a color coded gradient to indicate parts of the Scene that exceed the Paper White value. The gradient ranges from yellow to red. Yellow corresponds to **Paper White** +1, and red corresponds to **Max Nits**.
+This debug view uses a color coded gradient to indicate parts of the scene that exceed the Paper White value. The gradient ranges from yellow to red. Yellow corresponds to **Paper White** +1, and red corresponds to **Max Nits**.
 
 ## Platform Compatibility
 
 URP only supports HDR Output on the following platforms:
 
 * Windows with DirectX 11, DirectX 12 or Vulkan
-* MacOS with Metal
+* MacOS devices that use Metal
+* iOS 16+ devices
 * Consoles
 * XR devices with HDR support
+* Android devices that use Vulkan and GLES
 
 > **Note**: DirectX 11 only supports HDR Output in the Player, it does not support HDR Output in the Editor.
+

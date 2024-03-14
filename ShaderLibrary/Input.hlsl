@@ -1,8 +1,6 @@
 #ifndef UNIVERSAL_INPUT_INCLUDED
 #define UNIVERSAL_INPUT_INCLUDED
 
-#include "Packages/com.unity.render-pipelines.universal-config/Runtime/ShaderConfig.cs.hlsl"
-
 #define MAX_VISIBLE_LIGHTS_UBO  32
 #define MAX_VISIBLE_LIGHTS_SSBO 256
 
@@ -13,12 +11,13 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Deprecated.hlsl"
 
 // Must match: UniversalRenderPipeline.maxVisibleAdditionalLights
-#if defined(SHADER_API_MOBILE) && (defined(SHADER_API_GLES) || defined(SHADER_API_GLES30))
-    #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_LOW_END_MOBILE
-#elif defined(SHADER_API_MOBILE) || (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)) || defined(SHADER_API_GLES) || defined(SHADER_API_GLES3) // Workaround because SHADER_API_GLCORE is also defined when SHADER_API_SWITCH is
-    #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_MOBILE
+#if defined(SHADER_API_MOBILE) && defined(SHADER_API_GLES30)
+    #define MAX_VISIBLE_LIGHTS 16
+// WebGPU's minimal limits are based on mobile rather than desktop, so it will need to assume mobile.
+#elif defined(SHADER_API_MOBILE) || (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)) || defined(SHADER_API_GLES3) || defined(SHADER_API_WEBGPU) // Workaround because SHADER_API_GLCORE is also defined when SHADER_API_SWITCH is
+    #define MAX_VISIBLE_LIGHTS 32
 #else
-    #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_DESKTOP
+    #define MAX_VISIBLE_LIGHTS 256
 #endif
 
 // Match with values in UniversalRenderPipeline.cs
@@ -118,6 +117,8 @@ float _RenderingLayerRcpMaxInt;
 float4 _ScreenCoordScaleBias;
 float4 _ScreenSizeOverride;
 
+uint _EnableProbeVolumes;
+
 #if USE_FORWARD_PLUS
 float4 _FPParams0;
 float4 _FPParams1;
@@ -162,8 +163,8 @@ CBUFFER_END
 
 #if USE_FORWARD_PLUS
 
-CBUFFER_START(URP_ZBinBuffer)
-        float4 URP_ZBins[MAX_ZBIN_VEC4S];
+CBUFFER_START(urp_ZBinBuffer)
+        float4 urp_ZBins[MAX_ZBIN_VEC4S];
 CBUFFER_END
 CBUFFER_START(urp_TileBuffer)
         float4 urp_Tiles[MAX_TILE_VEC4S];

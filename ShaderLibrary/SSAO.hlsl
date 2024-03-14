@@ -16,8 +16,6 @@ SAMPLER(sampler_BlitTexture);
 
 // Params
 half4 _BlurOffset;
-half _KawaseBlurIteration;
-int _LastKawasePass;
 half4 _SSAOParams;
 float4 _CameraViewTopLeftCorner[2];
 float4x4 _CameraViewProjections[2]; // This is different from UNITY_MATRIX_VP (platform-agnostic projection matrix is used). Handle both non-XR and XR modes.
@@ -40,9 +38,7 @@ half4 _SSAOBlueNoiseParams;
 #define BlueNoiseOffset         _SSAOBlueNoiseParams.zw
 #endif
 
-#if defined(SHADER_API_GLES) && !defined(SHADER_API_GLES3)
-    static const int SAMPLE_COUNT = 3;
-#elif defined(_SAMPLE_COUNT_HIGH)
+#if defined(_SAMPLE_COUNT_HIGH)
     static const int SAMPLE_COUNT = 12;
 #elif defined(_SAMPLE_COUNT_MEDIUM)
     static const int SAMPLE_COUNT = 8;
@@ -215,9 +211,14 @@ half3 PickSamplePoint(float2 uv, int sampleIndex, half sampleIndexHalf, half rcp
     return v;
 }
 
+// For Downsampled SSAO we need to adjust the UV coordinates
+// so it hits the center of the pixel inside the depth texture.
+// The texelSize multiplier is 1.0 when DOWNSAMPLE is enabled, otherwise 0.0
+#define ADJUSTED_DEPTH_UV(uv) uv.xy + ((_CameraDepthTexture_TexelSize.xy * 0.5) * (1.0 - (DOWNSAMPLE - 0.5) * 2.0))
+
 float SampleDepth(float2 uv)
 {
-    return SampleSceneDepth(uv.xy);
+    return SampleSceneDepth(ADJUSTED_DEPTH_UV(uv.xy));
 }
 
 float GetLinearEyeDepth(float rawDepth)
@@ -644,10 +645,8 @@ half KawaseBlur(Varyings input) : SV_Target
     half2 uv = input.texcoord;
     half2 texelSize = _SourceSize.zw * rcp(DOWNSAMPLE);
 
-    half col = KawaseBlurFilter(uv, texelSize, _KawaseBlurIteration);
-
-    if (_LastKawasePass)
-        col = HALF_ONE - col;
+    half col = KawaseBlurFilter(uv, texelSize, 0);
+    col = HALF_ONE - col;
 
     return col;
 }

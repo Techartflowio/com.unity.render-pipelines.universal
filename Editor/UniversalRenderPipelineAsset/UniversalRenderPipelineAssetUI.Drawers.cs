@@ -19,6 +19,7 @@ namespace UnityEditor.Rendering.Universal
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
             AdaptivePerformance = 1 << 6,
 #endif
+            Volumes = 1 << 7,
         }
 
         enum ExpandableAdditional
@@ -112,7 +113,8 @@ namespace UnityEditor.Rendering.Universal
             CED.FoldoutGroup(Styles.qualitySettingsText, Expandable.Quality, k_ExpandedState, DrawQuality),
             CED.AdditionalPropertiesFoldoutGroup(Styles.lightingSettingsText, Expandable.Lighting, k_ExpandedState, ExpandableAdditional.Lighting, k_AdditionalPropertiesState, DrawLighting, DrawLightingAdditional),
             CED.AdditionalPropertiesFoldoutGroup(Styles.shadowSettingsText, Expandable.Shadows, k_ExpandedState, ExpandableAdditional.Shadows, k_AdditionalPropertiesState, DrawShadows, DrawShadowsAdditional),
-            CED.FoldoutGroup(Styles.postProcessingSettingsText, Expandable.PostProcessing, k_ExpandedState, DrawPostProcessing)
+            CED.FoldoutGroup(Styles.postProcessingSettingsText, Expandable.PostProcessing, k_ExpandedState, DrawPostProcessing),
+            CED.FoldoutGroup(Styles.volumeSettingsText, Expandable.Volumes, k_ExpandedState, DrawVolumes)
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
             , CED.FoldoutGroup(Styles.adaptivePerformanceText, Expandable.AdaptivePerformance, k_ExpandedState, CED.Group(DrawAdaptivePerformance))
 #endif
@@ -219,6 +221,30 @@ namespace UnityEditor.Rendering.Universal
             EditorGUI.indentLevel--;
             EditorGUILayout.Space();
 
+            // Probe volumes
+            EditorGUILayout.PropertyField(serialized.lightProbeSystem, Styles.lightProbeSystemContent);
+            if (serialized.lightProbeSystem.intValue == (int)LightProbeSystem.ProbeVolumes)
+            {
+                EditorGUI.indentLevel++;
+
+                EditorGUILayout.PropertyField(serialized.probeVolumeTextureSize, Styles.probeVolumeMemoryBudget);
+                EditorGUILayout.PropertyField(serialized.probeVolumeSHBands, Styles.probeVolumeSHBands);
+                EditorGUILayout.PropertyField(serialized.supportProbeVolumeStreaming, Styles.supportProbeVolumeStreaming);
+
+                int estimatedVMemCost = ProbeReferenceVolume.instance.GetVideoMemoryCost();
+                if (estimatedVMemCost == 0)
+                {
+                    EditorGUILayout.HelpBox($"Estimated GPU Memory cost: 0.\nProbe reference volume is not used in the scene and resources haven't been allocated yet.", MessageType.Info, wide: true);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox($"Estimated GPU Memory cost: {estimatedVMemCost / (1000 * 1000)} MB.", MessageType.Info, wide: true);
+                }
+
+                EditorGUI.indentLevel--;
+                EditorGUILayout.Space();
+            }
+
             // Additional light
             EditorGUILayout.PropertyField(serialized.additionalLightsRenderingModeProp, Styles.addditionalLightsRenderingModeText);
             EditorGUI.indentLevel++;
@@ -324,25 +350,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            // Detect if we are targeting GLES2, so we can warn users about the lack of cascades on that platform
-
-            BuildTarget platform = EditorUserBuildSettings.activeBuildTarget;
-            GraphicsDeviceType[] graphicsAPIs = PlayerSettings.GetGraphicsAPIs(platform);
-
-            bool usingGLES2 = false;
-            for (int apiIndex = 0; apiIndex < graphicsAPIs.Length; apiIndex++)
-            {
-                if (graphicsAPIs[apiIndex] == GraphicsDeviceType.OpenGLES2)
-                {
-                    usingGLES2 = true;
-                    break;
-                }
-            }
-
             EditorGUILayout.IntSlider(serialized.shadowCascadeCountProp, UniversalRenderPipelineAsset.k_ShadowCascadeMinCount, UniversalRenderPipelineAsset.k_ShadowCascadeMaxCount, Styles.shadowCascadesText);
-
-            if (usingGLES2)
-                EditorGUILayout.HelpBox(Styles.shadowCascadesUnsupportedMessage.text, MessageType.Info);
 
             int cascadeCount = serialized.shadowCascadeCountProp.intValue;
             EditorGUI.indentLevel++;
@@ -555,7 +563,57 @@ namespace UnityEditor.Rendering.Universal
 
             EditorGUILayout.PropertyField(serialized.useFastSRGBLinearConversion, Styles.useFastSRGBLinearConversion);
             EditorGUILayout.PropertyField(serialized.supportDataDrivenLensFlare, Styles.supportDataDrivenLensFlare);
+            EditorGUILayout.PropertyField(serialized.supportScreenSpaceLensFlare, Styles.supportScreenSpaceLensFlare);
+        }
+
+        static Editor s_VolumeProfileEditor;
+        static void DrawVolumes(SerializedUniversalRenderPipelineAsset serialized, Editor ownerEditor)
+        {
             CoreEditorUtils.DrawPopup(Styles.volumeFrameworkUpdateMode, serialized.volumeFrameworkUpdateModeProp, Styles.volumeFrameworkUpdateOptions);
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PropertyField(serialized.volumeProfileProp, Styles.volumeProfileLabel);
+            var profile = serialized.volumeProfileProp.objectReferenceValue as VolumeProfile;
+            if (EditorGUI.EndChangeCheck() && UniversalRenderPipeline.asset == serialized.serializedObject.targetObject && RenderPipelineManager.currentPipeline is UniversalRenderPipeline)
+                VolumeManager.instance.SetQualityDefaultProfile(serialized.volumeProfileProp.objectReferenceValue as VolumeProfile);
+
+            var contextMenuButtonRect = GUILayoutUtility.GetRect(CoreEditorStyles.contextMenuIcon,
+                Styles.volumeProfileContextMenuStyle.Value);
+            if (GUI.Button(contextMenuButtonRect, CoreEditorStyles.contextMenuIcon,
+                    Styles.volumeProfileContextMenuStyle.Value))
+            {
+                var profileEditor = s_VolumeProfileEditor as VolumeProfileEditor;
+                var componentEditors = profileEditor != null ? profileEditor.componentList.editors : null;
+                var srpAsset = serialized.serializedObject.targetObject as UniversalRenderPipelineAsset;
+                var pos = new Vector2(contextMenuButtonRect.x, contextMenuButtonRect.yMax);
+                VolumeProfileUtils.OnVolumeProfileContextClick(pos, srpAsset.volumeProfile, componentEditors,
+                    overrideStateOnReset: false,
+                    defaultVolumeProfilePath: $"Assets/{srpAsset.name}_VolumeProfile.asset",
+                    onNewVolumeProfileCreated: volumeProfile =>
+                    {
+                        Undo.RecordObject(srpAsset, "Set UniversalRenderPipelineAsset Volume Profile");
+                        srpAsset.volumeProfile = volumeProfile;
+                        if (UniversalRenderPipeline.asset == srpAsset)
+                            VolumeManager.instance.SetQualityDefaultProfile(volumeProfile);
+                        EditorUtility.SetDirty(srpAsset);
+                    });
+            }
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(2);
+
+            if (profile != null)
+            {
+                Editor.CreateCachedEditor(profile, typeof(VolumeProfileEditor), ref s_VolumeProfileEditor);
+                bool oldEnabled = GUI.enabled;
+                GUI.enabled = AssetDatabase.IsOpenForEdit(profile);
+                s_VolumeProfileEditor.OnInspectorGUI();
+                GUI.enabled = oldEnabled;
+            }
+            else
+            {
+                CoreUtils.Destroy(s_VolumeProfileEditor);
+            }
         }
 
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER

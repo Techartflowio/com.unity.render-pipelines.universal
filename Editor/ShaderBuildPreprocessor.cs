@@ -134,18 +134,21 @@ namespace UnityEditor.Rendering.Universal
         private static VolumeFeatures s_VolumeFeatures;
         private static List<ShaderFeatures> s_SupportedFeaturesList = new();
 
-        // Helper calss to detect XR build targets at build time.
-        internal sealed class XRPlatformBuildTimeDetect
+        // Helper class to detect XR build targets at build time.
+        internal sealed class PlatformBuildTimeDetect
         {
-            private static XRPlatformBuildTimeDetect xrPlatformInfo;
+            private static PlatformBuildTimeDetect s_PlatformInfo;
             internal bool isStandaloneXR { get; private set; }
             internal bool isHololens { get; private set; }
             internal bool isQuest { get; private set; }
+            internal bool isSwitch { get; private set; }
 
-            private XRPlatformBuildTimeDetect()
+            private PlatformBuildTimeDetect()
             {
+                BuildTargetGroup buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+                isSwitch = buildTargetGroup == BuildTargetGroup.Switch;
+
 #if XR_MANAGEMENT_4_0_1_OR_NEWER
-                var buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
                 var buildTargetSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(buildTargetGroup);
                 if (buildTargetSettings != null && buildTargetSettings.AssignedSettings != null && buildTargetSettings.AssignedSettings.activeLoaders.Count > 0)
                 {
@@ -156,17 +159,17 @@ namespace UnityEditor.Rendering.Universal
 #endif
             }
 
-            internal static XRPlatformBuildTimeDetect GetInstance()
+            internal static PlatformBuildTimeDetect GetInstance()
             {
-                if (xrPlatformInfo == null)
-                    xrPlatformInfo = new XRPlatformBuildTimeDetect();
+                if (s_PlatformInfo == null)
+                    s_PlatformInfo = new PlatformBuildTimeDetect();
 
-                return xrPlatformInfo;
+                return s_PlatformInfo;
             }
 
             internal static void ClearInstance()
             {
-                xrPlatformInfo = null;
+                s_PlatformInfo = null;
             }
         }
 
@@ -207,7 +210,7 @@ namespace UnityEditor.Rendering.Universal
         // Called after the build has finished...
         public void OnPostprocessBuild(BuildReport report)
         {
-            XRPlatformBuildTimeDetect.ClearInstance();
+            PlatformBuildTimeDetect.ClearInstance();
 #if PROFILE_BUILD
             Profiler.enabled = false;
 #endif
@@ -252,30 +255,29 @@ namespace UnityEditor.Rendering.Universal
                 s_StripDebugDisplayShaders = true;
             }
 
-            #if XR_MANAGEMENT_4_0_1_OR_NEWER
+            PlatformBuildTimeDetect platformBuildTimeDetect = PlatformBuildTimeDetect.GetInstance();
+            bool isShaderAPIMobileDefined = GraphicsSettings.HasShaderDefine(BuiltinShaderDefine.SHADER_API_MOBILE);
+            if (platformBuildTimeDetect.isSwitch || isShaderAPIMobileDefined)
+                s_UseSHPerVertexForSHAuto = true;
+
             // XR Stripping
-            XRGeneralSettings generalSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget));
-            s_StripXRVariants = generalSettings == null || generalSettings.Manager == null || generalSettings.Manager.activeLoaders.Count <= 0;
+            #if XR_MANAGEMENT_4_0_1_OR_NEWER
+                BuildTargetGroup buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+                XRGeneralSettings generalSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(buildTargetGroup);
+                s_StripXRVariants = generalSettings == null || generalSettings.Manager == null || generalSettings.Manager.activeLoaders.Count <= 0;
 
-            if (XRPlatformBuildTimeDetect.GetInstance().isStandaloneXR)
-                s_StripDebugDisplayShaders = true;
+                if (platformBuildTimeDetect.isStandaloneXR)
+                    s_StripDebugDisplayShaders = true;
 
-            if (XRPlatformBuildTimeDetect.GetInstance().isHololens)
-            {
-                s_KeepOffVariantForAdditionalLights = true;
-                s_UseSoftShadowQualityLevelKeywords = true;
-                s_UseSHPerVertexForSHAuto = true;
-            }
-
-            if (XRPlatformBuildTimeDetect.GetInstance().isQuest)
-            {
-                s_KeepOffVariantForAdditionalLights = true;
-                s_UseSoftShadowQualityLevelKeywords = true;
-                s_UseSHPerVertexForSHAuto = true;
-            }
+                if (platformBuildTimeDetect.isHololens || platformBuildTimeDetect.isQuest)
+                {
+                    s_KeepOffVariantForAdditionalLights = true;
+                    s_UseSoftShadowQualityLevelKeywords = true;
+                    s_UseSHPerVertexForSHAuto = true;
+                }
             #else
-            s_UseSoftShadowQualityLevelKeywords = false;
-            s_StripXRVariants = true;
+                s_UseSoftShadowQualityLevelKeywords = false;
+                s_StripXRVariants = true;
             #endif
         }
 
@@ -389,6 +391,15 @@ namespace UnityEditor.Rendering.Universal
                     throw new ArgumentOutOfRangeException();
             }
 
+            if (urpAsset.lightProbeSystem == LightProbeSystem.ProbeVolumes)
+            {
+                if (urpAsset.probeVolumeSHBands == ProbeVolumeSHBands.SphericalHarmonicsL1)
+                    urpAssetShaderFeatures |= ShaderFeatures.ProbeVolumeL1;
+
+                if (urpAsset.probeVolumeSHBands == ProbeVolumeSHBands.SphericalHarmonicsL2)
+                    urpAssetShaderFeatures |= ShaderFeatures.ProbeVolumeL2;
+            }
+
             if (urpAsset.supportsMixedLighting)
                 urpAssetShaderFeatures |= ShaderFeatures.MixedLighting;
 
@@ -413,6 +424,9 @@ namespace UnityEditor.Rendering.Universal
 
             if (urpAsset.shEvalMode == ShEvalMode.Auto)
                 urpAssetShaderFeatures |= ShaderFeatures.AutoSHMode;
+
+            if (urpAsset.supportScreenSpaceLensFlare)
+                urpAssetShaderFeatures |= ShaderFeatures.ScreenSpaceLensFlare;
 
             if (urpAsset.supportDataDrivenLensFlare)
                 urpAssetShaderFeatures |= ShaderFeatures.DataDrivenLensFlare;
@@ -684,6 +698,7 @@ namespace UnityEditor.Rendering.Universal
                         shaderFeatures |= ShaderFeatures.DBufferMRT1;
                         shaderFeatures |= ShaderFeatures.DBufferMRT2;
                         shaderFeatures |= ShaderFeatures.DBufferMRT3;
+                        shaderFeatures |= ShaderFeatures.DecalScreenSpace;
                         shaderFeatures |= ShaderFeatures.DecalNormalBlendLow;
                         shaderFeatures |= ShaderFeatures.DecalNormalBlendMedium;
                         shaderFeatures |= ShaderFeatures.DecalNormalBlendHigh;

@@ -9,21 +9,19 @@
 #undef unity_MatrixPreviousMI
 // TODO: This might not work correctly in all cases, double check!
 UNITY_DOTS_INSTANCING_START(BuiltinPropertyMetadata)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_ObjectToWorld)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_WorldToObject)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_LODFade)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_RenderingLayer)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_SpecCube0_HDR)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_LightmapST)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_LightmapIndex)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_DynamicLightmapST)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_MatrixPreviousM)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_MatrixPreviousMI)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(SH,       unity_SHCoefficients)
-    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(uint2,    unity_EntityId)
+    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_ObjectToWorld)
+    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_WorldToObject)
+    UNITY_DOTS_INSTANCED_PROP(float4,   unity_SpecCube0_HDR)
+    UNITY_DOTS_INSTANCED_PROP(float4,   unity_LightmapST)
+    UNITY_DOTS_INSTANCED_PROP(float4,   unity_LightmapIndex)
+    UNITY_DOTS_INSTANCED_PROP(float4,   unity_DynamicLightmapST)
+    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_MatrixPreviousM)
+    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_MatrixPreviousMI)
+    UNITY_DOTS_INSTANCED_PROP(SH,       unity_SHCoefficients)
+    UNITY_DOTS_INSTANCED_PROP(uint2,    unity_EntityId)
 UNITY_DOTS_INSTANCING_END(BuiltinPropertyMetadata)
 
-#define unity_LODFade               UNITY_ACCESS_DOTS_INSTANCED_PROP(float4,   unity_LODFade)
+#define unity_LODFade               LoadDOTSInstancedData_LODFade()
 #define unity_SpecCube0_HDR         UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, unity_SpecCube0_HDR, unity_DOTS_SpecCube0_HDR)
 #define unity_LightmapST            UNITY_ACCESS_DOTS_INSTANCED_PROP(float4,   unity_LightmapST)
 #define unity_LightmapIndex         UNITY_ACCESS_DOTS_INSTANCED_PROP(float4,   unity_LightmapIndex)
@@ -41,6 +39,7 @@ UNITY_DOTS_INSTANCING_END(BuiltinPropertyMetadata)
 #define unity_RenderingLayer        LoadDOTSInstancedData_RenderingLayer()
 
 #define UNITY_SETUP_DOTS_SH_COEFFS  SetupDOTSSHCoeffs(UNITY_DOTS_INSTANCED_METADATA_NAME(SH, unity_SHCoefficients))
+#define UNITY_SETUP_DOTS_RENDER_BOUNDS  SetupDOTSRendererBounds(UNITY_DOTS_MATRIX_M)
 
 // Not supported by BatchRendererGroup. Just define them as constants.
 // ------------------------------------------------------------------------------
@@ -66,6 +65,7 @@ int unity_SubmeshIndex;
 #else
 
 #define unity_SelectionID _SelectionID
+#define UNITY_SETUP_DOTS_RENDER_BOUNDS
 
 #endif
 

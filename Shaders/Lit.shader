@@ -56,6 +56,7 @@ Shader "Universal Render Pipeline/Lit"
         [HideInInspector] _ZWrite("__zw", Float) = 1.0
         [HideInInspector] _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
+        [HideInInspector] _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
 
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         // Editmode props
@@ -159,6 +160,7 @@ Shader "Universal Render Pipeline/Lit"
             #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
             #pragma multi_compile_fog
             #pragma multi_compile_fragment _ DEBUG_DISPLAY
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
 
             //--------------------------------------
             // GPU Instancing
@@ -287,6 +289,7 @@ Shader "Universal Render Pipeline/Lit"
             #pragma multi_compile _ DYNAMICLIGHTMAP_ON
             #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
 
             //--------------------------------------
             // GPU Instancing
@@ -371,7 +374,7 @@ Shader "Universal Render Pipeline/Lit"
             #pragma shader_feature_local _NORMALMAP
             #pragma shader_feature_local _PARALLAXMAP
             #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
-            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local _ALPHATEST_ON
             #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
 
             // -------------------------------------
@@ -467,6 +470,22 @@ Shader "Universal Render Pipeline/Lit"
             // Includes
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Universal2D.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "MotionVectors"
+            Tags { "LightMode" = "MotionVectors" }
+            ColorMask RG
+
+            HLSLPROGRAM
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
+            #pragma shader_feature_local_vertex _ADD_PRECOMPUTED_VELOCITY
+
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ObjectMotionVectors.hlsl"
             ENDHLSL
         }
     }

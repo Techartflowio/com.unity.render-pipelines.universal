@@ -65,7 +65,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         public void Dispose()
         {
-            m_DeferredLights.ReleaseGbufferResources();
+            m_DeferredLights?.ReleaseGbufferResources();
         }
 
         public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
@@ -96,7 +96,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                         continue;
 
                     // No need to setup temporaryRTs if we are using input attachments as they will be Memoryless
-                    if (m_DeferredLights.UseRenderPass && i != m_DeferredLights.GBufferRenderingLayers && (i != m_DeferredLights.GbufferDepthIndex && !m_DeferredLights.HasDepthPrepass))
+                    if (m_DeferredLights.UseRenderPass && (i != m_DeferredLights.GbufferDepthIndex && !m_DeferredLights.HasDepthPrepass))
                         continue;
 
                     m_DeferredLights.ReAllocateGBufferIfNeeded(cameraTextureDescriptor, i);
@@ -117,22 +117,13 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
+            InitPassData(ref renderingData, ref m_PassData);
+            InitRendererLists(ref renderingData, ref m_PassData, context, default(RenderGraph), false);
+
             var cmd = renderingData.commandBuffer;
-            m_PassData.filteringSettings = m_FilteringSettings;
             using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
-                m_PassData.deferredLights = m_DeferredLights;
-
-                // User can stack several scriptable renderers during rendering but deferred renderer should only lit pixels added by this gbuffer pass.
-                // If we detect we are in such case (camera is in overlay mode), we clear the highest bits of stencil we have control of and use them to
-                // mark what pixel to shade during deferred pass. Gbuffer will always mark pixels using their material types.
-
-
-                ref CameraData cameraData = ref renderingData.cameraData;
-                ShaderTagId lightModeTag = s_ShaderTagUniversalGBuffer;
-                m_PassData.drawingSettings = CreateDrawingSettings(lightModeTag, ref renderingData, renderingData.cameraData.defaultOpaqueSortFlags);
-
-                ExecutePass(context, m_PassData, ref renderingData);
+                ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(cmd), m_PassData, m_PassData.rendererList, m_PassData.objectsWithErrorRendererList, ref renderingData);
 
                 // If any sub-system needs camera normal texture, make it available.
                 // Input attachments will only be used when this is not needed so safe to skip in that case
@@ -141,119 +132,201 @@ namespace UnityEngine.Rendering.Universal.Internal
             }
         }
 
-        static void ExecutePass(ScriptableRenderContext context, PassData data, ref RenderingData renderingData, bool useRenderGraph = false)
+        static void ExecutePass(RasterCommandBuffer cmd, PassData data, RendererList rendererList, RendererList errorRendererList, ref RenderingData renderingData)
         {
             bool usesRenderingLayers = data.deferredLights.UseRenderingLayers && !data.deferredLights.HasRenderingLayerPrepass;
             if (usesRenderingLayers)
-                CoreUtils.SetKeyword(renderingData.commandBuffer, ShaderKeywordStrings.WriteRenderingLayers, true);
-
-            context.ExecuteCommandBuffer(renderingData.commandBuffer);
-            renderingData.commandBuffer.Clear();
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.WriteRenderingLayers, true);
 
             if (data.deferredLights.IsOverlay)
-            {
-                data.deferredLights.ClearStencilPartial(renderingData.commandBuffer);
-                context.ExecuteCommandBuffer(renderingData.commandBuffer);
-                renderingData.commandBuffer.Clear();
-            }
+                data.deferredLights.ClearStencilPartial(cmd);
 
-            NativeArray<ShaderTagId> tagValues = new NativeArray<ShaderTagId>(s_ShaderTagValues, Allocator.Temp);
-            NativeArray<RenderStateBlock> stateBlocks = new NativeArray<RenderStateBlock>(s_RenderStateBlocks, Allocator.Temp);
-
-            context.DrawRenderers(renderingData.cullResults, ref data.drawingSettings, ref data.filteringSettings, s_ShaderTagUniversalMaterialType, false, tagValues, stateBlocks);
-
-            tagValues.Dispose();
-            stateBlocks.Dispose();
+            cmd.DrawRendererList(rendererList);
 
             // Render objects that did not match any shader pass with error shader
-            RenderingUtils.RenderObjectsWithError(context, ref renderingData.cullResults, renderingData.cameraData.camera, data.filteringSettings, SortingCriteria.None);
-
-            // If any sub-system needs camera normal texture, make it available.
-            // Input attachments will only be used when this is not needed so safe to skip in that case
-            if (!data.deferredLights.UseRenderPass)
-                renderingData.commandBuffer.SetGlobalTexture(s_CameraNormalsTextureID, data.deferredLights.GbufferAttachments[data.deferredLights.GBufferNormalSmoothnessIndex]);
+            RenderingUtils.DrawRendererListObjectsWithError(cmd, ref errorRendererList);
 
             // Clean up
             if (usesRenderingLayers)
-            {
-                CoreUtils.SetKeyword(renderingData.commandBuffer, ShaderKeywordStrings.WriteRenderingLayers, false);
-                context.ExecuteCommandBuffer(renderingData.commandBuffer);
-                renderingData.commandBuffer.Clear();
-            }
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.WriteRenderingLayers, false);
         }
 
+        /// <summary>
+        /// Shared pass data
+        /// </summary>
         private class PassData
         {
             internal TextureHandle[] gbuffer;
             internal TextureHandle depth;
 
             internal RenderingData renderingData;
-
             internal DeferredLights deferredLights;
-            internal FilteringSettings filteringSettings;
-            internal DrawingSettings drawingSettings;
+
+            internal RendererListHandle rendererListHdl;
+            internal RendererListHandle objectsWithErrorRendererListHdl;
+
+            // Required for code sharing purpose between RG and non-RG.
+            internal RendererList rendererList;
+            internal RendererList objectsWithErrorRendererList;
         }
 
-        internal void Render(RenderGraph renderGraph, TextureHandle cameraColor, TextureHandle cameraDepth,
-            ref RenderingData renderingData, ref UniversalRenderer.RenderGraphFrameResources frameResources)
+        /// <summary>
+        /// Initialize the shared pass data.
+        /// </summary>
+        /// <param name="passData"></param>
+        private void InitPassData(ref RenderingData renderingData, ref PassData passData)
         {
-            using (var builder = renderGraph.AddRenderPass<PassData>("GBuffer Pass", out var passData, m_ProfilingSampler))
+            passData.deferredLights = m_DeferredLights;
+            passData.renderingData = renderingData;
+        }
+
+        private void InitRendererLists(ref RenderingData renderingData, ref PassData passData, ScriptableRenderContext context, RenderGraph renderGraph, bool useRenderGraph)
+        {
+            // User can stack several scriptable renderers during rendering but deferred renderer should only lit pixels added by this gbuffer pass.
+            // If we detect we are in such case (camera is in overlay mode), we clear the highest bits of stencil we have control of and use them to
+            // mark what pixel to shade during deferred pass. Gbuffer will always mark pixels using their material types.
+            ShaderTagId lightModeTag = s_ShaderTagUniversalGBuffer;
+            var drawingSettings = CreateDrawingSettings(lightModeTag, ref renderingData, renderingData.cameraData.defaultOpaqueSortFlags);
+            var filterSettings = m_FilteringSettings;
+            NativeArray<ShaderTagId> tagValues = new NativeArray<ShaderTagId>(s_ShaderTagValues, Allocator.Temp);
+            NativeArray<RenderStateBlock> stateBlocks = new NativeArray<RenderStateBlock>(s_RenderStateBlocks, Allocator.Temp);
+            var param = new RendererListParams(renderingData.cullResults, drawingSettings, filterSettings)
             {
-                passData.gbuffer = frameResources.gbuffer = m_DeferredLights.GbufferTextureHandles;
+                tagValues = tagValues,
+                stateBlocks = stateBlocks,
+                tagName = s_ShaderTagUniversalMaterialType,
+                isPassTagName = false
+            };
+            if (useRenderGraph)
+            {
+                passData.rendererListHdl = renderGraph.CreateRendererList(param);
+            }
+            else
+            {
+                passData.rendererList = context.CreateRendererList(ref param);
+            }
+            tagValues.Dispose();
+            stateBlocks.Dispose();
+
+            if (useRenderGraph)
+            {
+                RenderingUtils.CreateRendererListObjectsWithError(renderGraph, ref renderingData.cullResults, renderingData.cameraData.camera, filterSettings, SortingCriteria.None, ref passData.objectsWithErrorRendererListHdl);
+            }
+            else
+            {
+                RenderingUtils.CreateRendererListObjectsWithError(context, ref renderingData.cullResults, renderingData.cameraData.camera, filterSettings, SortingCriteria.None, ref passData.objectsWithErrorRendererList);
+            }
+        }
+
+        internal TextureHandle[] GetFrameResourcesGBufferArray(FrameResources frameResources)
+        {
+            TextureHandle[] gbuffer = m_DeferredLights.GbufferTextureHandles;
+
+            Debug.Assert(gbuffer.Length <= 7, "GBufferPass.GetFrameResourcesGBufferArray: the gbuffer frame resources are limited to 7!");
+
+            for (int i = 0; i < gbuffer.Length; ++i)
+            {
+                gbuffer[i] = frameResources.GetTexture((UniversalResource)(UniversalResource.GBuffer0 + i));
+            }
+
+            return gbuffer;
+        }
+
+        internal void SetFrameResourcesGBufferArray(FrameResources frameResources, TextureHandle[] gbuffer)
+        {
+            Debug.Assert(gbuffer.Length <= 7, "GBufferPass.SetFrameResourcesGBufferArray: the gbuffer frame resources are limited to 7!");
+
+            for (int i = 0; i < gbuffer.Length; ++i)
+                frameResources.SetTexture((UniversalResource)(UniversalResource.GBuffer0 + i), gbuffer[i]);
+        }
+
+
+        internal void Render(RenderGraph renderGraph, TextureHandle cameraColor, TextureHandle cameraDepth,
+            ref RenderingData renderingData, FrameResources frameResources)
+        {
+            TextureHandle[] gbuffer;
+
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("GBuffer Pass", out var passData, m_ProfilingSampler))
+            {
+                // Note: This code is pretty confusing as passData.gbuffer[i] and gbuffer[i] actually point to the same array but seem to be mixed in this code.
+                passData.gbuffer = gbuffer = m_DeferredLights.GbufferTextureHandles;
                 for (int i = 0; i < m_DeferredLights.GBufferSliceCount; i++)
                 {
                     var gbufferSlice = renderingData.cameraData.cameraTargetDescriptor;
                     gbufferSlice.depthBufferBits = 0; // make sure no depth surface is actually created
                     gbufferSlice.stencilFormat = GraphicsFormat.None;
 
-                    if (i != m_DeferredLights.GBufferLightingIndex)
+                    if (i == m_DeferredLights.GBufferNormalSmoothnessIndex && m_DeferredLights.HasNormalPrepass)
+                        gbuffer[i] = frameResources.GetTexture(UniversalResource.CameraNormalsTexture);
+                    else if (m_DeferredLights.UseRenderingLayers && i == m_DeferredLights.GBufferRenderingLayers && !m_DeferredLights.UseLightLayers)
+                        gbuffer[i] = frameResources.GetTexture(UniversalResource.RenderingLayersTexture);
+                    else if (i != m_DeferredLights.GBufferLightingIndex)
                     {
                         gbufferSlice.graphicsFormat = m_DeferredLights.GetGBufferFormat(i);
-                        frameResources.gbuffer[i] = UniversalRenderer.CreateRenderGraphTexture(renderGraph, gbufferSlice, DeferredLights.k_GBufferNames[i], true);
+                        gbuffer[i] = UniversalRenderer.CreateRenderGraphTexture(renderGraph, gbufferSlice, DeferredLights.k_GBufferNames[i], true);
                     }
                     else
-                    {
-                        frameResources.gbuffer[i] = cameraColor;
-                    }
-                    passData.gbuffer[i] = builder.UseColorBuffer(frameResources.gbuffer[i], i);
+                        gbuffer[i] = cameraColor;
+
+                    // Note: We don't store the returned handle here it is a versioned handle.
+                    // In general it should be fine to use unversioned handles anyway especially unversioned resources
+                    // should be registered in the frame resources (cfr. SetFrameResourcesGBufferArray call below)
+                    builder.UseTextureFragment(gbuffer[i], i, IBaseRenderGraphBuilder.AccessFlags.Write);
                 }
 
-                passData.deferredLights = m_DeferredLights;
-                passData.depth = builder.UseDepthBuffer(cameraDepth, DepthAccess.Write);
+                SetFrameResourcesGBufferArray(frameResources, gbuffer);
+                passData.depth = builder.UseTextureFragmentDepth(cameraDepth, IBaseRenderGraphBuilder.AccessFlags.Write);
 
-                passData.renderingData = renderingData;
+                InitPassData(ref renderingData, ref passData);
+                InitRendererLists(ref renderingData, ref passData, default(ScriptableRenderContext), renderGraph, true);
+                builder.UseRendererList(passData.rendererListHdl);
+                builder.UseRendererList(passData.objectsWithErrorRendererListHdl);
 
                 builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
 
-                passData.filteringSettings = m_FilteringSettings;
-                ShaderTagId lightModeTag = s_ShaderTagUniversalGBuffer;
-                passData.drawingSettings = CreateDrawingSettings(lightModeTag, ref passData.renderingData, renderingData.cameraData.defaultOpaqueSortFlags);
-
-                builder.SetRenderFunc((PassData data, RenderGraphContext context) =>
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
-                    ExecutePass(context.renderContext, data, ref data.renderingData, true);
+                    ExecutePass(context.cmd, data, data.rendererListHdl, data.objectsWithErrorRendererListHdl, ref data.renderingData);
                 });
-
             }
-            using (var builder = renderGraph.AddRenderPass<PassData>("Set GBuffer Globals", out var passData, m_ProfilingSampler))
+
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Set Global GBuffer Textures", out var passData, m_ProfilingSampler))
             {
-                passData.gbuffer = frameResources.gbuffer = m_DeferredLights.GbufferTextureHandles;
+                passData.gbuffer = gbuffer = GetFrameResourcesGBufferArray(frameResources);
+                passData.deferredLights = m_DeferredLights;
+
                 for (int i = 0; i < m_DeferredLights.GBufferSliceCount; i++)
                 {
-                    passData.gbuffer[i] = builder.UseColorBuffer(frameResources.gbuffer[i], i);
+                    if (i != m_DeferredLights.GBufferLightingIndex)
+                        passData.gbuffer[i] = builder.UseTexture(gbuffer[i], IBaseRenderGraphBuilder.AccessFlags.Read);
                 }
-                passData.depth = builder.UseDepthBuffer(cameraDepth, DepthAccess.Read);
-                passData.renderingData = renderingData;
-                passData.deferredLights = m_DeferredLights;
+
+                for (int i = 0; i < RenderGraphUtils.DBufferSize; ++i)
+                {
+                    var dbuffer = frameResources.GetTexture((UniversalResource) (UniversalResource.DBuffer0 + i));
+                    if (dbuffer.IsValid())
+                        builder.UseTexture(dbuffer);
+                }
 
                 builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
 
-                builder.SetRenderFunc((PassData data, RenderGraphContext context) =>
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
                     for (int i = 0; i < data.gbuffer.Length; i++)
                     {
                         if (i != data.deferredLights.GBufferLightingIndex)
-                            data.renderingData.commandBuffer.SetGlobalTexture(DeferredLights.k_GBufferNames[i], data.gbuffer[i]);
+                            context.cmd.SetGlobalTexture(DeferredLights.k_GBufferNames[i], data.gbuffer[i]);
+                    }
+                    // If any sub-system needs camera normal texture, make it available.
+                    // Input attachments will only be used when this is not needed so safe to skip in that case
+                    context.cmd.SetGlobalTexture(s_CameraNormalsTextureID, data.gbuffer[data.deferredLights.GBufferNormalSmoothnessIndex]);
+
+                    if (data.deferredLights.UseRenderingLayers)
+                    {
+                        context.cmd.SetGlobalTexture(DeferredLights.k_GBufferNames[data.deferredLights.GBufferRenderingLayers], data.gbuffer[data.deferredLights.GBufferRenderingLayers]);
+                        context.cmd.SetGlobalTexture("_CameraRenderingLayersTexture", data.gbuffer[data.deferredLights.GBufferRenderingLayers]);
                     }
                 });
             }

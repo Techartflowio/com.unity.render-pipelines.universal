@@ -19,6 +19,7 @@ Shader "Universal Render Pipeline/Baked Lit"
         [HideInInspector] _DstBlendAlpha("__dstA", Float) = 0.0
         [HideInInspector] _ZWrite("__zw", Float) = 1.0
         [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
+        [HideInInspector] _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
 
         // Editmode props
         _QueueOffset("Queue offset", Float) = 0.0
@@ -76,6 +77,7 @@ Shader "Universal Render Pipeline/Baked Lit"
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
             #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
             #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
             // -------------------------------------
@@ -298,6 +300,22 @@ Shader "Universal Render Pipeline/Baked Lit"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/BakedLitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Universal2D.hlsl"
 
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "MotionVectors"
+            Tags { "LightMode" = "MotionVectors" }
+            ColorMask RG
+
+            HLSLPROGRAM
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
+            #pragma shader_feature_local_vertex _ADD_PRECOMPUTED_VELOCITY
+
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/BakedLitInput.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ObjectMotionVectors.hlsl"
             ENDHLSL
         }
     }

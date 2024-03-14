@@ -10,30 +10,29 @@ namespace UnityEngine.Rendering.Universal
         DebugDisplaySettingsCommon commonSettings { get; set; }
 
         /// <summary>
-        /// Material-related Rendering Debugger settings.
+        /// Material-related rendering debugger settings.
         /// </summary>
         public DebugDisplaySettingsMaterial materialSettings { get; private set; }
 
         /// <summary>
-        /// Rendering-related Rendering Debugger settings.
+        /// Rendering-related rendering debugger settings.
         /// </summary>
         public DebugDisplaySettingsRendering renderingSettings { get; private set; }
 
         /// <summary>
-        /// Lighting-related Rendering Debugger settings.
+        /// Lighting-related rendering debugger settings.
         /// </summary>
         public DebugDisplaySettingsLighting lightingSettings { get; private set; }
 
         /// <summary>
-        /// Volume-related Rendering Debugger settings.
+        /// Volume-related rendering debugger settings.
         /// </summary>
         public DebugDisplaySettingsVolume volumeSettings { get; private set; }
 
         /// <summary>
         /// Display stats.
         /// </summary>
-        internal DebugDisplayStats displayStats { get; private set; }
-
+        internal DebugDisplaySettingsStats<URPProfileId> displayStats { get; private set; }
 
         #region IDebugDisplaySettingsQuery
 
@@ -89,7 +88,7 @@ namespace UnityEngine.Rendering.Universal
         {
             base.Reset();
 
-            displayStats = Add(new DebugDisplayStats());
+            displayStats = Add(new DebugDisplaySettingsStats<URPProfileId>(new UniversalRenderPipelineDebugDisplayStats()));
             materialSettings = Add(new DebugDisplaySettingsMaterial());
             lightingSettings = Add(new DebugDisplaySettingsLighting());
             renderingSettings = Add(new DebugDisplaySettingsRendering());
@@ -97,10 +96,10 @@ namespace UnityEngine.Rendering.Universal
             commonSettings = Add(new DebugDisplaySettingsCommon());
         }
 
-        internal void UpdateFrameTiming()
+        internal void UpdateDisplayStats()
         {
             if (displayStats != null)
-                displayStats.UpdateFrameTiming();
+                displayStats.debugDisplayStats.Update();
         }
     }
 }

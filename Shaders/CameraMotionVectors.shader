@@ -10,8 +10,6 @@ Shader "Hidden/Universal Render Pipeline/CameraMotionVectors"
             ZWrite On
 
             HLSLPROGRAM
-
-            #pragma exclude_renderers d3d11_9x
             #pragma target 3.5
 
             #pragma vertex vert
@@ -52,14 +50,6 @@ Shader "Hidden/Universal Render Pipeline/CameraMotionVectors"
                 return output;
             }
 
-            #if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
-                // Non-uniform raster needs to keep the posNDC values in float to avoid additional conversions
-                // since uv remap functions use floats
-                #define POS_NDC_TYPE float2
-            #else
-                #define POS_NDC_TYPE half2
-            #endif
-
             // -------------------------------------
             // Fragment
             half4 frag(Varyings input, out float outDepth : SV_Depth) : SV_Target
@@ -90,8 +80,10 @@ Shader "Hidden/Universal Render Pipeline/CameraMotionVectors"
                 float4 posCS = mul(_NonJitteredViewProjMatrix, float4(posWS.xyz, 1.0));
                 float4 prevPosCS = mul(_PrevViewProjMatrix, float4(posWS.xyz, 1.0));
 
-                POS_NDC_TYPE posNDC = posCS.xy * rcp(posCS.w);
-                POS_NDC_TYPE prevPosNDC = prevPosCS.xy * rcp(prevPosCS.w);
+                // Non-uniform raster needs to keep the posNDC values in float to avoid additional conversions
+                // since uv remap functions use floats
+                float2 posNDC = posCS.xy * rcp(posCS.w);
+                float2 prevPosNDC = prevPosCS.xy * rcp(prevPosCS.w);
 
                 float2 velocity;
                 #if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
@@ -99,8 +91,9 @@ Shader "Hidden/Universal Render Pipeline/CameraMotionVectors"
                 {
                     // Convert velocity from NDC space (-1..1) to screen UV 0..1 space since FoveatedRendering remap needs that range.
                     // Also return both position in non-uniform UV space to get the right velocity vector
-                    half2 posUV = RemapFoveatedRenderingLinearToNonUniform(posNDC * 0.5f + 0.5f);
-                    half2 prevPosUV = RemapFoveatedRenderingPrevFrameLinearToNonUniform(prevPosNDC * 0.5f + 0.5f);
+
+                    float2 posUV = RemapFoveatedRenderingResolve(posNDC * 0.5f + 0.5f);
+                    float2 prevPosUV = RemapFoveatedRenderingPrevFrameLinearToNonUniform(prevPosNDC * 0.5f + 0.5f);
 
                     // Calculate forward velocity
                     velocity = (posUV - prevPosUV);
@@ -125,7 +118,7 @@ Shader "Hidden/Universal Render Pipeline/CameraMotionVectors"
                     velocity.xy *= 0.5;
                 }
 
-                return half4(velocity, 0, 0);
+                return float4(velocity, 0, 0);
             }
 
             ENDHLSL

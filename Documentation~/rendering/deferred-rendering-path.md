@@ -6,11 +6,11 @@ URP Universal Renderer supports the following Rendering Paths:
 * Forward+
 * Deferred
 
-For information on differences between the rendering paths, see section [Rendering Path comparison](../urp-universal-renderer.md#rendering-path-comparison).
+For information on differences between the rendering paths, check the [Rendering Path comparison](../urp-universal-renderer.md#rendering-path-comparison).
 
 This section describes the Deferred Rendering Path.
 
-![Scene rendered with the Deferred Rendering Path](../Images/rendering-deferred/deferred-intro-image.png)<br/>*Sample Scene rendered with the Deferred Rendering Path.*
+![Scene rendered with the Deferred Rendering Path](../Images/rendering-deferred/deferred-intro-image.png)<br/>*Sample scene rendered with the Deferred Rendering Path.*
 
 This section contains the following topics:
 
@@ -40,7 +40,7 @@ The **Accurate G-buffer normals** property lets you configure how Unity encodes 
 
 * **Accurate G-buffer normals** on: Unity uses the octahedron encoding to store values of normal vectors in the RGB channel of a normal texture. With this encoding, values of normal vectors are more accurate, but the encoding and decoding operations put extra load on the GPU. This option does not support decal normal blending when used with the [Screen Space decal technique](../renderer-feature-decal.md#screen-space-technique).
 
-For more information about this setting, see the section [Encoding of normals in G-buffer](#accurate-g-buffer-normals).
+For more information about this setting, refer to [Encoding of normals in G-buffer](#accurate-g-buffer-normals).
 
 ## <a name="requirements"></a>Unity Player system requirements
 
@@ -82,7 +82,7 @@ This field is a bit field that contains Material flags:
 
 Bits 4-7 are reserved for future use.
 
-For more technical details, see the file `/ShaderLibrary/UnityGBuffer.hlsl`.
+For more technical details, check the file `/ShaderLibrary/UnityGBuffer.hlsl`.
 
 **Specular**
 
@@ -100,7 +100,7 @@ This field contains the baked occlusion value from the baked lighting. For real-
 
 **Normal**
 
-This field contains the world space normals encoded in 24 bits. For information on the encoding of normals, see section [Encoding of normals in G-buffer](#accurate-g-buffer-normals).
+This field contains the world space normals encoded in 24 bits. For information on the encoding of normals, refer to [Encoding of normals in G-buffer](#accurate-g-buffer-normals).
 
 **Smoothness**
 
@@ -130,9 +130,9 @@ The Subtractive and the Shadow mask modes are optimized for the Forward Renderin
 
 **Rendering Layer Mask**
 
-Unity adds this render target to the G-buffer layout when the Use Rendering Layers option is enabled (URP Asset, **Lighting** > **Use Rendering Layers**). 
+Unity adds this render target to the G-buffer layout when the Use Rendering Layers option is enabled (URP Asset, **Lighting** > **Use Rendering Layers**).
 
-Using Rendering Layers might have an impact on the GPU performance. For more information, see the page [Rendering Layers](../features/rendering-layers.md#performance).
+Using Rendering Layers might have an impact on the GPU performance. For more information, refer to the documentation on [Rendering Layers](../features/rendering-layers.md#performance).
 
 **Depth as Color**
 
@@ -146,7 +146,7 @@ The format of the Depth as Color render target is `GraphicsFormat.R32_SFloat`.
 
 **DepthStencil**
 
-Unity reserves the four highest bits of this render target to mark the Material type. See also [URP Pass tags: UniversalMaterialType](../urp-shaders/urp-shaderlab-pass-tags.md#universalmaterialtype).
+Unity reserves the four highest bits of this render target to mark the Material type. Also check [URP Pass tags: UniversalMaterialType](../urp-shaders/urp-shaderlab-pass-tags.md#universalmaterialtype).
 
 For this render target, Unity selects either the `D32F_S8` format, or the `D24S8` format depending on the platform.
 
@@ -321,9 +321,9 @@ Examples of such shaders:
 
 * **Baked Lit** and **Unlit**: these shaders do not calculate real-time lighting, that's why Unity renders them into the Emissive/GI/Lighting buffer directly during the Forward-only pass. This is faster than evaluating the shaders in the Deferred rendering (stencil) pass.
 
-* **Custom shaders**: Unity renders the shaders that do not declare the Pass tags required by the Deferred Rendering Path as Forward-only. The required Pass tags are: `LightMode`, and `UniversalMaterialType`. For more information, see [URP Pass tags](../urp-shaders/urp-shaderlab-pass-tags.md).
+* **Custom shaders**: Unity renders the shaders that do not declare the Pass tags required by the Deferred Rendering Path as Forward-only. The required Pass tags are: `LightMode`, and `UniversalMaterialType`. For more information, refer to [URP Pass tags](../urp-shaders/urp-shaderlab-pass-tags.md).
 
-Unity renders Materials with such shaders in the Forward Rendering Path. For the SSAO Renderer Feature to be able to calculate ambient occlusion for the Materials using the **Complex Lit** shader, Unity must render such Materials in the depth and normal prepass first. This is because Unity does not render those Materials in the G-buffer pass (GBufferPass). For more information, see [URP Pass tags](../urp-shaders/urp-shaderlab-pass-tags.md).
+Unity renders Materials with such shaders in the Forward Rendering Path. For the SSAO Renderer Feature to be able to calculate ambient occlusion for the Materials using the **Complex Lit** shader, Unity must render such Materials in the depth and normal prepass first. This is because Unity does not render those Materials in the G-buffer pass (GBufferPass). For more information, refer to [URP Pass tags](../urp-shaders/urp-shaderlab-pass-tags.md).
 
 #### General implementation notes
 
@@ -385,7 +385,7 @@ To indicate that Unity must render a certain Material in the Forward-only Pass i
 
 To specify the shader lighting model (Lit, SimpleLit), use the `UniversalMaterialType` tag.
 
-For more information, see the section [URP Pass tags: LightMode](../urp-shaders/urp-shaderlab-pass-tags.md#lightmode).
+For more information, refer to the documentation on [URP Pass tags: LightMode](../urp-shaders/urp-shaderlab-pass-tags.md#lightmode).
 
 ## Limitations and performance
 
@@ -401,7 +401,7 @@ In the Deferred Rendering Path, Unity combines Terrain layers in the G-buffer pa
 
 Unity combines the Material properties in the G-buffer using hardware blending (four layers at a time), which limits how correct the combination of property values is. For example, pixel normals cannot be correctly combined using the alpha blend equation alone, because one Terrain layer might contain coarse Terrain detail while another layer might contain fine detail. Averaging or summing normals results in loss of accuracy.
 
-> **NOTE:** Turning the setting [Accurate G-buffer normals](#accurate-g-buffer-normals) on breaks Terrain blending. With this setting turned on, Unity encodes normals using octahedron encoding. Normals in different layers encoded this way cannot be blended together because of the bitwise nature of the encoding (2 x 12 bits). If your application requires more than four Terrain layers, turn the **Accurate G-buffer normals** setting off.
+> **Note**: Turning the setting [Accurate G-buffer normals](#accurate-g-buffer-normals) on breaks Terrain blending. With this setting turned on, Unity encodes normals using octahedron encoding. Normals in different layers encoded this way cannot be blended together because of the bitwise nature of the encoding (2 x 12 bits). If your application requires more than four Terrain layers, turn the **Accurate G-buffer normals** setting off.
 
 <a name="terrain-visual-diff"></a>The following illustration shows the visual difference when rendering Terrain layers with different Rendering Paths.
 
@@ -419,9 +419,9 @@ In the Deferred Rendering Path, the Baked Indirect Lighting mode provides better
 
 ### Rendering layers
 
-URP implements the Rendering Layers feature that lets you configure which Lights in a Scene affect specific meshes. Lights assigned to a specific Rendering Layer only affect the meshes assigned to the same Rendering Layer.
+URP implements the Rendering Layers feature that lets you configure which Lights in a scene affect specific meshes. Lights assigned to a specific Rendering Layer only affect the meshes assigned to the same Rendering Layer.
 
-For more information on Rendering Layers, see the page [Rendering Layers](../features/rendering-layers.md).
+For more information on Rendering Layers, refer to the documentation on [Rendering Layers](../features/rendering-layers.md).
 
 **Performance impact**
 
@@ -431,4 +431,4 @@ The Rendering Layers feature requires an extra G-buffer render target to store t
 
 In the Forward Rendering Path, the [Layers](https://docs.unity3d.com/Manual/Layers.html) feature lets you tell Unity to render specific meshes with a specific set of Lights. The [Layers](https://docs.unity3d.com/Manual/Layers.html) feature uses the culling mask system.
 
-The Deferred Rendering Path cannot use the layer system with light culling masks, because the shading is deferred to a later stage in the rendering loop (see the **Deferred rendering (stencil)** step in the [Deferred Rendering Path render Passes](#render-passes) table.)
+The Deferred Rendering Path cannot use the layer system with light culling masks, because the shading is deferred to a later stage in the rendering loop (check the **Deferred rendering (stencil)** step in the [Deferred Rendering Path render Passes](#render-passes) table.)

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Experimental.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal.Internal;
 
 namespace UnityEngine.Rendering.Universal
@@ -19,6 +21,7 @@ namespace UnityEngine.Rendering.Universal
         private DeferredLights m_DeferredLights;
         private RTHandle[] m_GbufferAttachments;
         private bool m_DecalLayers;
+        private PassData m_PassData;
 
         public DecalGBufferRenderPass(DecalScreenSpaceSettings settings, DecalDrawGBufferSystem drawSystem, bool decalLayers)
         {
@@ -36,6 +39,7 @@ namespace UnityEngine.Rendering.Universal
             else
                 m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DecalGBufferMesh));
 
+            m_PassData = new PassData();
             m_GbufferAttachments = new RTHandle[4];
         }
 
@@ -96,29 +100,84 @@ namespace UnityEngine.Rendering.Universal
 
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
+            InitPassData(ref m_PassData);
+
             SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
-            DrawingSettings drawingSettings = CreateDrawingSettings(m_ShaderTagIdList, ref renderingData, sortingCriteria);
-
-            var cmd = renderingData.commandBuffer;
-            using (new ProfilingScope(cmd, m_ProfilingSampler))
+            DrawingSettings drawingSettings = RenderingUtils.CreateDrawingSettings(m_ShaderTagIdList, ref renderingData, sortingCriteria);
+            var param = new RendererListParams(renderingData.cullResults, drawingSettings, m_FilteringSettings);
+            var rendererList = context.CreateRendererList(ref param);
+            using (new ProfilingScope(renderingData.commandBuffer, m_ProfilingSampler))
             {
-                context.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
+                ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, rendererList, ref renderingData);
+            }
+        }
 
-                NormalReconstruction.SetupProperties(cmd, renderingData.cameraData);
+        private class PassData
+        {
+            internal DecalDrawGBufferSystem drawSystem;
+            internal DecalScreenSpaceSettings settings;
+            internal bool decalLayers;
 
-                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendLow, m_Settings.normalBlend == DecalNormalBlend.Low);
-                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendMedium, m_Settings.normalBlend == DecalNormalBlend.Medium);
-                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendHigh, m_Settings.normalBlend == DecalNormalBlend.High);
+            internal RenderingData renderingData;
+            internal RendererListHandle rendererList;
+        }
 
-                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalLayers, m_DecalLayers);
+        private void InitPassData(ref PassData passData)
+        {
+            passData.drawSystem = m_DrawSystem;
+            passData.settings = m_Settings;
+            passData.decalLayers = m_DecalLayers;
+        }
 
-                context.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
+        private static void ExecutePass(RasterCommandBuffer cmd, PassData passData, RendererList rendererList, ref RenderingData renderingData)
+        {
+            NormalReconstruction.SetupProperties(cmd, renderingData.cameraData);
 
-                m_DrawSystem?.Execute(cmd);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendLow, passData.settings.normalBlend == DecalNormalBlend.Low);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendMedium, passData.settings.normalBlend == DecalNormalBlend.Medium);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalNormalBlendHigh, passData.settings.normalBlend == DecalNormalBlend.High);
 
-                context.DrawRenderers(renderingData.cullResults, ref drawingSettings, ref m_FilteringSettings);
+            CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.DecalLayers, passData.decalLayers);
+
+            passData.drawSystem?.Execute(cmd);
+            cmd.DrawRendererList(rendererList);
+        }
+
+        public override void RecordRenderGraph(RenderGraph renderGraph, FrameResources frameResources, ref RenderingData renderingData)
+        {
+            UniversalRenderer renderer = (UniversalRenderer)renderingData.cameraData.renderer;
+
+            TextureHandle cameraDepthTexture = frameResources.GetTexture(UniversalResource.CameraDepthTexture);
+
+            RenderGraphUtils.SetGlobalTexture(renderGraph, Shader.PropertyToID("_CameraDepthTexture"), cameraDepthTexture);
+
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Decal GBuffer Pass", out var passData, m_ProfilingSampler))
+            {
+                InitPassData(ref passData);
+                passData.renderingData = renderingData;
+
+                builder.UseTextureFragment(frameResources.GetTexture(UniversalResource.GBuffer0), 0, IBaseRenderGraphBuilder.AccessFlags.Write);
+                builder.UseTextureFragment(frameResources.GetTexture(UniversalResource.GBuffer1), 1, IBaseRenderGraphBuilder.AccessFlags.Write);
+                builder.UseTextureFragment(frameResources.GetTexture(UniversalResource.GBuffer2), 2, IBaseRenderGraphBuilder.AccessFlags.Write);
+                builder.UseTextureFragment(frameResources.GetTexture(UniversalResource.GBuffer3), 3, IBaseRenderGraphBuilder.AccessFlags.Write);
+                builder.UseTextureFragmentDepth(renderer.activeDepthTexture, IBaseRenderGraphBuilder.AccessFlags.Read);
+
+                if (cameraDepthTexture.IsValid())
+                    builder.UseTexture(cameraDepthTexture, IBaseRenderGraphBuilder.AccessFlags.Read);
+
+
+                SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
+                DrawingSettings drawingSettings = RenderingUtils.CreateDrawingSettings(m_ShaderTagIdList, ref renderingData, sortingCriteria);
+                var param = new RendererListParams(renderingData.cullResults, drawingSettings, m_FilteringSettings);
+                passData.rendererList = renderGraph.CreateRendererList(param);
+                builder.UseRendererList(passData.rendererList);
+
+                builder.AllowGlobalStateModification(true);
+
+                builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
+                {
+                    ExecutePass(rgContext.cmd, data, data.rendererList, ref data.renderingData);
+                });
             }
         }
 

@@ -83,6 +83,8 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public struct RenderingData
     {
+        internal NativeArray<URPLightShadowCullingInfos> visibleLightsShadowCullingInfos;
+        internal AdditionalLightsShadowAtlasLayout shadowAtlasLayout;
         internal CommandBuffer commandBuffer;
 
         /// <summary>
@@ -219,19 +221,27 @@ namespace UnityEngine.Rendering.Universal
             m_JitterMatrix = jitterMatrix;
         }
 
+#if ENABLE_VR && ENABLE_XR_MODULE
+        private bool m_CachedRenderIntoTextureXR;
+        private bool m_InitBuiltinXRConstants;
+#endif
         // Helper function to populate builtin stereo matricies as well as URP stereo matricies
-        internal void PushBuiltinShaderConstantsXR(CommandBuffer cmd, bool renderIntoTexture)
+        internal void PushBuiltinShaderConstantsXR(RasterCommandBuffer cmd, bool renderIntoTexture)
         {
 #if ENABLE_VR && ENABLE_XR_MODULE
-            if (xr.enabled)
+            // Multipass always needs update to prevent wrong view projection matrix set by other passes
+            bool needsUpdate = !m_InitBuiltinXRConstants || m_CachedRenderIntoTextureXR != renderIntoTexture || !xr.singlePassEnabled;
+            if (needsUpdate && xr.enabled )
             {
-                cmd.SetViewProjectionMatrices(GetViewMatrix(), GetProjectionMatrix());
+                var projection0 = GetProjectionMatrix();
+                var view0 = GetViewMatrix();
+                cmd.SetViewProjectionMatrices(view0, projection0);
                 if (xr.singlePassEnabled)
                 {
-                    for (int viewId = 0; viewId < xr.viewCount; viewId++)
-                    {
-                        XRBuiltinShaderConstants.UpdateBuiltinShaderConstants(GetViewMatrix(viewId), GetProjectionMatrix(viewId), renderIntoTexture, viewId);
-                    }
+                    var projection1 = GetProjectionMatrix(1);
+                    var view1 = GetViewMatrix(1);
+                    XRBuiltinShaderConstants.UpdateBuiltinShaderConstants(view0, projection0, renderIntoTexture, 0);
+                    XRBuiltinShaderConstants.UpdateBuiltinShaderConstants(view1, projection1, renderIntoTexture, 1);
                     XRBuiltinShaderConstants.SetBuiltinShaderConstants(cmd);
                 }
                 else
@@ -240,6 +250,8 @@ namespace UnityEngine.Rendering.Universal
                     Vector3 worldSpaceCameraPos = Matrix4x4.Inverse(GetViewMatrix(0)).GetColumn(3);
                     cmd.SetGlobalVector(ShaderPropertyId.worldSpaceCameraPos, worldSpaceCameraPos);
                 }
+                m_CachedRenderIntoTextureXR = renderIntoTexture;
+                m_InitBuiltinXRConstants = true;
             }
 #endif
         }
@@ -343,7 +355,7 @@ namespace UnityEngine.Rendering.Universal
         internal float aspectRatio;
 
         /// <summary>
-        /// Render scale to apply when creating camera textures.
+        /// Render scale to apply when creating camera textures. Scaled extents are rounded down to integers.
         /// </summary>
         public float renderScale;
         internal ImageScalingMode imageScalingMode;
@@ -440,7 +452,7 @@ namespace UnityEngine.Rendering.Universal
                 if (xr.enabled)
                     hdrDisplayOutputActive = xr.isHDRDisplayOutputActive;
 #endif
-                return hdrDisplayOutputActive && allowHDROutput && resolveToScreen;
+        		return hdrDisplayOutputActive && allowHDROutput && resolveToScreen;
             }
         }
 
@@ -549,34 +561,7 @@ namespace UnityEngine.Rendering.Universal
             Debug.Assert(renderer != null, "IsCameraProjectionMatrixFlipped is being called outside camera rendering scope.");
 
             if (renderer != null)
-            {
-                var handle = renderer.cameraColorTargetHandle;
-
-                bool flipped;
-#pragma warning disable 0618 // Obsolete usage: Backwards compatibility for renderer using cameraColorTarget instead of cameraColorTargetHandle
-                if (handle == null)
-                {
-                    if (cameraType == CameraType.SceneView)
-                    {
-                        flipped = true;
-                    }
-                    else
-                    {
-                        var handleID = new RenderTargetIdentifier(renderer.cameraColorTarget, 0, CubemapFace.Unknown, 0);
-                        bool isBackbuffer = handleID == BuiltinRenderTextureType.CameraTarget;
-#if ENABLE_VR && ENABLE_XR_MODULE
-                        if (xr.enabled)
-                            isBackbuffer |= handleID == new RenderTargetIdentifier(xr.renderTarget, 0, CubemapFace.Unknown, 0);
-#endif
-                        flipped = !isBackbuffer;
-                    }
-                }
-                else
-#pragma warning restore 0618
-                    flipped = IsHandleYFlipped(handle);
-
-                return flipped || targetTexture != null;
-            }
+                return IsHandleYFlipped(renderer.cameraColorTargetHandle) || targetTexture != null;
 
             return true;
         }
@@ -626,13 +611,6 @@ namespace UnityEngine.Rendering.Universal
         public XRPass xr { get; internal set; }
 
         internal XRPassUniversal xrUniversal => xr as XRPassUniversal;
-
-        /// <summary>
-        /// Is XR enabled or not.
-        /// This is obsolete, please use xr.enabled instead.
-        /// </summary>
-        [Obsolete("Please use xr.enabled instead.", true)]
-        public bool isStereoEnabled;
 
         /// <summary>
         /// Maximum shadow distance visible to the camera. When set to zero shadows will be disable for that camera.
@@ -752,13 +730,6 @@ namespace UnityEngine.Rendering.Universal
         internal bool mainLightShadowsEnabled;
 
         /// <summary>
-        /// True if screen space shadows are required.
-        /// Obsolete, this feature was replaced by new 'ScreenSpaceShadows' renderer feature
-        /// </summary>
-        [Obsolete("Obsolete, this feature was replaced by new 'ScreenSpaceShadows' renderer feature")]
-        public bool requiresScreenSpaceShadowResolve;
-
-        /// <summary>
         /// The width of the main light shadow map.
         /// </summary>
         public int mainLightShadowmapWidth;
@@ -827,6 +798,9 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool isKeywordAdditionalLightShadowsEnabled;
         internal bool isKeywordSoftShadowsEnabled;
+        internal int mainLightShadowResolution;
+        internal int mainLightRenderTargetWidth;
+        internal int mainLightRenderTargetHeight;
     }
 
     /// <summary>
@@ -946,6 +920,7 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int cosTime = Shader.PropertyToID("_CosTime");
         public static readonly int deltaTime = Shader.PropertyToID("unity_DeltaTime");
         public static readonly int timeParameters = Shader.PropertyToID("_TimeParameters");
+        public static readonly int lastTimeParameters = Shader.PropertyToID("_LastTimeParameters");
 
         public static readonly int scaledScreenParams = Shader.PropertyToID("_ScaledScreenParams");
         public static readonly int worldSpaceCameraPos = Shader.PropertyToID("_WorldSpaceCameraPos");
@@ -979,11 +954,21 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int billboardTangent = Shader.PropertyToID("unity_BillboardTangent");
         public static readonly int billboardCameraParams = Shader.PropertyToID("unity_BillboardCameraParams");
 
+        public static readonly int previousViewProjectionNoJitter = Shader.PropertyToID("_PrevViewProjMatrix");
+        public static readonly int viewProjectionNoJitter = Shader.PropertyToID("_NonJitteredViewProjMatrix");
+#if ENABLE_VR && ENABLE_XR_MODULE
+        public static readonly int previousViewProjectionNoJitterStereo = Shader.PropertyToID("_PrevViewProjMatrixStereo");
+        public static readonly int viewProjectionNoJitterStereo = Shader.PropertyToID("_NonJitteredViewProjMatrixStereo");
+#endif
+
         public static readonly int blitTexture = Shader.PropertyToID("_BlitTexture");
         public static readonly int blitScaleBias = Shader.PropertyToID("_BlitScaleBias");
         public static readonly int sourceTex = Shader.PropertyToID("_SourceTex");
         public static readonly int scaleBias = Shader.PropertyToID("_ScaleBias");
         public static readonly int scaleBiasRt = Shader.PropertyToID("_ScaleBiasRt");
+
+        // This uniform is specific to the RTHandle system
+        public static readonly int rtHandleScale = Shader.PropertyToID("_RTHandleScale");
 
         // Required for 2D Unlit Shadergraph master node as it doesn't currently support hidden properties.
         public static readonly int rendererColor = Shader.PropertyToID("_RendererColor");
@@ -1019,7 +1004,12 @@ namespace UnityEngine.Rendering.Universal
         /// True if fast approximation functions are used when converting between the sRGB and Linear color spaces, false otherwise.
         /// </summary>
         public bool useFastSRGBLinearConversion;
-
+        
+        /// <summary>
+        /// Returns true if Screen Space Lens Flare are supported by this asset, false otherwise.
+        /// </summary>
+        public bool supportScreenSpaceLensFlare;
+        
         /// <summary>
         /// Returns true if Data Driven Lens Flare are supported by this asset, false otherwise.
         /// </summary>
@@ -1205,8 +1195,8 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Keyword used for Gamma 2.0. </summary>
         public const string Gamma20 = "_GAMMA_20";
 
-        /// <summary> Keyword used for Fast Approximate Anti-aliasing (FXAA) with Gamma 2.0 encoding. </summary>
-        public const string FxaaAndGamma20 = "_FXAA_AND_GAMMA_20";
+        /// <summary> Keyword used for Gamma 2.0 with HDR_INPUT. </summary>
+        public const string Gamma20AndHDRInput = "_GAMMA_20_AND_HDR_INPUT";
 
         /// <summary> Keyword used for high quality sampling for Depth Of Field. </summary>
         public const string HighQualitySampling = "_HIGH_QUALITY_SAMPLING";
@@ -1286,8 +1276,14 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Keyword used for Normal maps. </summary>
         public const string _NORMALMAP = "_NORMALMAP";
 
+        /// <summary> Keyword used for Alembic precomputed velocity. </summary>
+        public const string _ADD_PRECOMPUTED_VELOCITY = "_ADD_PRECOMPUTED_VELOCITY";
+
         /// <summary> Keyword used for editor visualization. </summary>
         public const string EDITOR_VISUALIZATION = "EDITOR_VISUALIZATION";
+
+        /// <summary> Keyword used for foveated rendering. </summary>
+        public const string FoveatedRenderingNonUniformRaster = "_FOVEATED_RENDERING_NON_UNIFORM_RASTER";
 
         /// <summary> Keyword used for disabling Texture 2D Arrays. </summary>
         public const string DisableTexture2DXArray = "DISABLE_TEXTURE2D_X_ARRAY";
@@ -1313,17 +1309,17 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Keyword used for sixteenth size downsampling. </summary>
         public const string DOWNSAMPLING_SIZE_16 = "DOWNSAMPLING_SIZE_16";
 
-        /// <summary> Keyword used for foveated rendering. </summary>
-        public const string FoveatedRenderingNonUniformRaster = "_FOVEATED_RENDERING_NON_UNIFORM_RASTER";
-
         /// <summary> Keyword used for mixed Spherical Harmonic (SH) evaluation in URP Lit shaders.</summary>
         public const string EVALUATE_SH_MIXED = "EVALUATE_SH_MIXED";
 
         /// <summary> Keyword used for vertex Spherical Harmonic (SH) evaluation in URP Lit shaders.</summary>
         public const string EVALUATE_SH_VERTEX = "EVALUATE_SH_VERTEX";
 
-        /// <summary> Keyword used for Drawing procedurally.</summary>
-        public const string UseDrawProcedural = "_USE_DRAW_PROCEDURAL";
+        /// <summary> Keyword used for APV with SH L1 </summary>
+        public const string ProbeVolumeL1 = "PROBE_VOLUMES_L1";
+
+        /// <summary> Keyword used for APV with SH L2 </summary>
+        public const string ProbeVolumeL2 = "PROBE_VOLUMES_L2";
     }
 
     public sealed partial class UniversalRenderPipeline
@@ -1353,20 +1349,6 @@ namespace UnityEngine.Rendering.Universal
                 throw new ArgumentNullException("camera");
 
             return camera.cameraType == CameraType.Game || camera.cameraType == CameraType.VR;
-        }
-
-        /// <summary>
-        /// Checks if a camera is rendering in stereo mode.
-        /// </summary>
-        /// <param name="camera">Camera to check state from.</param>
-        /// <returns>Returns true if the given camera is rendering in stereo mode, false otherwise.</returns>
-        [Obsolete("Please use CameraData.xr.enabled instead.", true)]
-        public static bool IsStereoEnabled(Camera camera)
-        {
-            if (camera == null)
-                throw new ArgumentNullException("camera");
-
-            return IsGameCamera(camera) && (camera.stereoTargetEye == StereoTargetEyeMask.Both);
         }
 
         /// <summary>
@@ -1400,9 +1382,11 @@ namespace UnityEngine.Rendering.Universal
             if (isHdrEnabled)
             {
                 // TODO: we need a proper format scoring system. Score formats, sort, pick first or pick first supported (if not in score).
-                if (!needsAlpha && requestHDRColorBufferPrecision != HDRColorBufferPrecision._64Bits && RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.B10G11R11_UFloatPack32, FormatUsage.Linear | FormatUsage.Render))
+                // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+                // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+                if (!needsAlpha && requestHDRColorBufferPrecision != HDRColorBufferPrecision._64Bits && SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormatUsage.Blend))
                     return GraphicsFormat.B10G11R11_UFloatPack32;
-                if (RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.Linear | FormatUsage.Render))
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.Blend))
                     return GraphicsFormat.R16G16B16A16_SFloat;
                 return SystemInfo.GetGraphicsFormat(DefaultFormat.HDR); // This might actually be a LDR format on old devices.
             }
@@ -1415,7 +1399,9 @@ namespace UnityEngine.Rendering.Universal
         // NOTE: This function does not guarantee that the returned format will contain an alpha channel.
         internal static GraphicsFormat MakeUnormRenderTextureGraphicsFormat()
         {
-            if (RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.A2B10G10R10_UNormPack32, FormatUsage.Linear | FormatUsage.Render))
+            // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+            // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+            if (SystemInfo.IsFormatSupported(GraphicsFormat.A2B10G10R10_UNormPack32, GraphicsFormatUsage.Blend))
                 return GraphicsFormat.A2B10G10R10_UNormPack32;
             else
                 return GraphicsFormat.R8G8B8A8_UNorm;
@@ -1525,7 +1511,7 @@ namespace UnityEngine.Rendering.Universal
                         spotLight.angularFalloff = AngularFalloffType.AnalyticAndInnerAngle;
                         lightData.Init(ref spotLight, ref cookie);
                         break;
-                    case LightType.Area:
+                    case LightType.Rectangle:
                         RectangleLight rectangleLight = new RectangleLight();
                         LightmapperUtils.Extract(light, ref rectangleLight);
                         rectangleLight.mode = LightMode.Baked;
@@ -1580,7 +1566,7 @@ namespace UnityEngine.Rendering.Universal
                             spotLight.angularFalloff = AngularFalloffType.AnalyticAndInnerAngle;
                             lightData.Init(ref spotLight);
                             break;
-                        case LightType.Area:
+                        case LightType.Rectangle:
                             // Rect area light is baked only in URP.
                             lightData.InitNoBake(light.GetInstanceID());
                             break;
@@ -1744,6 +1730,9 @@ namespace UnityEngine.Rendering.Universal
         }
     }
 
+    // URP Profile Id
+    // - Scopes using this enum are automatically picked up by the performance testing framework.
+    // - You can use [HideInDebugUI] attribute to hide a given id from the Detailed Stats section of Rendering Debugger.
     internal enum URPProfileId
     {
         // CPU
@@ -1786,16 +1775,46 @@ namespace UnityEngine.Rendering.Universal
         Bloom,
         LensFlareDataDrivenComputeOcclusion,
         LensFlareDataDriven,
+        LensFlareScreenSpace,
         MotionVectors,
         DrawFullscreen,
+
+        // PostProcessPass RenderGraph
+        [HideInDebugUI] RG_SetupPostFX,
+        [HideInDebugUI] RG_StopNaNs,
+        [HideInDebugUI] RG_SMAAMaterialSetup,
+        [HideInDebugUI] RG_SMAAEdgeDetection,
+        [HideInDebugUI] RG_SMAABlendWeight,
+        [HideInDebugUI] RG_SMAANeighborhoodBlend,
+        [HideInDebugUI] RG_SetupDoF,
+        [HideInDebugUI] RG_DOFComputeCOC,
+        [HideInDebugUI] RG_DOFDownscalePrefilter,
+        [HideInDebugUI] RG_DOFBlurH,
+        [HideInDebugUI] RG_DOFBlurV,
+        [HideInDebugUI] RG_DOFBlurBokeh,
+        [HideInDebugUI] RG_DOFPostFilter,
+        [HideInDebugUI] RG_DOFComposite,
+        [HideInDebugUI] RG_TAA,
+        [HideInDebugUI] RG_TAACopyHistory,
+        [HideInDebugUI] RG_MotionBlur,
+        [HideInDebugUI] RG_BloomSetupPass,
+        [HideInDebugUI] RG_BloomPrefilter,
+        [HideInDebugUI] RG_BloomFirstPass,
+        [HideInDebugUI] RG_BloomSecondPass,
+        [HideInDebugUI] RG_BloomUpsample,
+        [HideInDebugUI] RG_UberPostSetupBloomPass,
+        [HideInDebugUI] RG_UberPost,
+        [HideInDebugUI] RG_FinalSetup,
+        [HideInDebugUI] RG_FinalFSRScale,
+        [HideInDebugUI] RG_FinalBlit,
 
         FinalBlit
     }
 
     // Internal class to detect and cache runtime platform information.
-    // TODO: refine the logic to provide platform abstraction. Eg, we should devide platforms based on capabilities and perf budget.
-    // TODO: isXRMobile is a bad catagory. Alignment and refactor needed.
-    // TODO: Compress all the query data into "isXRMobile" style bools and enums.
+    // TODO: refine the logic to provide platform abstraction. Eg, we should divide platforms based on capabilities and perf budget.
+    // TODO: isXRMobile is a bad category. Alignment and refactor needed.
+    // TODO: Compress all the query data into "isXRMobile" style booleans and enums.
     internal static class PlatformAutoDetect
     {
         /// <summary>
@@ -1803,17 +1822,20 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         internal static void Initialize()
         {
-            bool isRunningXRMobile = false;
-#if ENABLE_VR && ENABLE_VR_MODULE
-#if PLATFORM_WINRT || PLATFORM_ANDROID
-            isRunningXRMobile = IsRunningXRMobile();
-#endif
-#endif
-            isXRMobile = isRunningXRMobile;
+            bool isRunningMobile = false;
+            #if ENABLE_VR && ENABLE_VR_MODULE
+                #if PLATFORM_WINRT || PLATFORM_ANDROID
+                    isRunningMobile = IsRunningXRMobile();
+                #endif
+            #endif
+
+            isXRMobile = isRunningMobile;
+            isShaderAPIMobileDefined = GraphicsSettings.HasShaderDefine(BuiltinShaderDefine.SHADER_API_MOBILE);
+            isSwitch = Application.platform == RuntimePlatform.Switch;
         }
 
 #if ENABLE_VR && ENABLE_VR_MODULE
-#if PLATFORM_WINRT || PLATFORM_ANDROID
+    #if PLATFORM_WINRT || PLATFORM_ANDROID
         // XR mobile platforms are not treated as dedicated mobile platforms in Core. Handle them specially here. (Quest and HL).
         private static List<XR.XRDisplaySubsystem> displaySubsystemList = new List<XR.XRDisplaySubsystem>();
         private static bool IsRunningXRMobile()
@@ -1822,7 +1844,7 @@ namespace UnityEngine.Rendering.Universal
             if (platform == RuntimePlatform.WSAPlayerX86 || platform == RuntimePlatform.WSAPlayerARM || platform == RuntimePlatform.WSAPlayerX64 || platform == RuntimePlatform.Android)
             {
                 XR.XRDisplaySubsystem display = null;
-                SubsystemManager.GetInstances(displaySubsystemList);
+                SubsystemManager.GetSubsystems(displaySubsystemList);
 
                 if (displaySubsystemList.Count > 0)
                     display = displaySubsystemList[0];
@@ -1832,12 +1854,40 @@ namespace UnityEngine.Rendering.Universal
             }
             return false;
         }
-#endif
+    #endif
 #endif
 
         /// <summary>
         /// If true, the runtime platform is an XR mobile platform.
         /// </summary>
-        static internal bool isXRMobile { get; private set; } = false;
+        internal static bool isXRMobile { get; private set; } = false;
+
+        /// <summary>
+        /// If true, then SHADER_API_MOBILE has been defined in URP Shaders.
+        /// </summary>
+        internal static bool isShaderAPIMobileDefined { get; private set; } = false;
+
+        /// <summary>
+        /// If true, then the runtime platform is set to Switch.
+        /// </summary>
+        internal static bool isSwitch { get; private set; } = false;
+
+        /// <summary>
+        /// Gives the SH evaluation mode when set to automatically detect.
+        /// </summary>
+        /// <param name="mode">The current SH evaluation mode.</param>
+        /// <returns>Returns the SH evaluation mode to use.</returns>
+        internal static ShEvalMode ShAutoDetect(ShEvalMode mode)
+        {
+            if (mode == ShEvalMode.Auto)
+            {
+                if (isXRMobile || isShaderAPIMobileDefined || isSwitch)
+                    return ShEvalMode.PerVertex;
+                else
+                    return ShEvalMode.PerPixel;
+            }
+
+            return mode;
+        }
     }
 }
