@@ -1407,6 +1407,9 @@ namespace UnityEngine.Rendering.Universal
                 {
                     case TonemappingMode.Neutral: material.EnableKeyword(ShaderKeywordStrings.TonemapNeutral); break;
                     case TonemappingMode.ACES: material.EnableKeyword(ShaderKeywordStrings.TonemapACES); break;
+                    /////////////////UE_ACES_BEGIN///////////////
+                    case TonemappingMode.ACES_UE5: material.EnableKeyword(ShaderKeywordStrings.TonemapACES_UE5); break;
+                    /////////////////UE_ACES_END///////////////
                     default: break; // None
                 }
             }

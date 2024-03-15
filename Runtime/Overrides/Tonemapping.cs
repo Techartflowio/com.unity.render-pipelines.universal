@@ -24,6 +24,10 @@ namespace UnityEngine.Rendering.Universal
         /// Note that if you use this tonemapper all the grading operations will be done in the ACES color spaces for optimal precision and results.
         /// </summary>
         ACES, // ACES Filmic reference tonemapper (custom approximation)
+        
+        /////////////////UE_ACES_BEGIN///////////////
+        ACES_UE5, // ACES Filmic reference tonemapper (UE5 approximation)
+        /////////////////UE_ACES_END/////////////////
     }
 
     /// <summary>
@@ -131,6 +135,25 @@ namespace UnityEngine.Rendering.Universal
         /// <inheritdoc/>
         [Obsolete("Unused #from(2023.1)", false)]
         public bool IsTileCompatible() => true;
+        
+        /////////////////UE_ACES_BEGIN/////////////////
+        //create floatParameter
+        /// This is only used when <see cref="Tonemapper.ACES_UE5"/> is active.
+        [Tooltip("Film_Slope")]
+        public ClampedFloatParameter slope = new ClampedFloatParameter(0.88f, 0f, 1f);
+        /// This is only used when <see cref="Tonemapper.ACES_UE5"/> is active.
+        [Tooltip("Film_Toe")]
+        public ClampedFloatParameter toe = new ClampedFloatParameter(0.55f, 0.0f, 1.0f);
+        /// This is only used when <see cref="Tonemapper.ACES_UE5"/> is active.
+        [Tooltip("Film_Shoulder")]
+        public ClampedFloatParameter shoulder = new ClampedFloatParameter(0.26f, 0.0f, 1.0f);
+        /// This is only used when <see cref="Tonemapper.ACES_UE5"/> is active.
+        [Tooltip("Film_BlackClip")]
+        public ClampedFloatParameter blackClip = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
+        /// This is only used when <see cref="Tonemapper.ACES_UE5"/> is active.
+        [Tooltip("Film_WhiteClip")]
+        public ClampedFloatParameter whiteClip = new ClampedFloatParameter(0.04f, 0.0f, 1.0f);
+        /////////////////UE_ACES_END///////////////////
     }
 
     /// <summary>

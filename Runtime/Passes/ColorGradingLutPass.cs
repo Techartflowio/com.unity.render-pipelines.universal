@@ -217,6 +217,15 @@ namespace UnityEngine.Rendering.Universal.Internal
                 material.SetTexture(ShaderConstants._CurveHueVsSat, curves.hueVsSat.value.GetTexture());
                 material.SetTexture(ShaderConstants._CurveLumVsSat, curves.lumVsSat.value.GetTexture());
                 material.SetTexture(ShaderConstants._CurveSatVsSat, curves.satVsSat.value.GetTexture());
+                
+                /////////////////UE_ACES_BEGIN/////////////////
+                //HDR Bind UI
+                material.SetFloat("FilmSlope", (float)tonemapping.slope);
+                material.SetFloat("FilmToe", (float)tonemapping.toe);
+                material.SetFloat("FilmShoulder", (float)tonemapping.shoulder);
+                material.SetFloat("FilmBlackClip", (float)tonemapping.blackClip);
+                material.SetFloat("FilmWhiteClip", (float)tonemapping.whiteClip);
+                /////////////////UE_ACES_END/////////////////
 
                 // Tonemapping (baked into the lut for HDR)
                 if (hdr)
@@ -227,6 +236,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     {
                         case TonemappingMode.Neutral: material.EnableKeyword(ShaderKeywordStrings.TonemapNeutral); break;
                         case TonemappingMode.ACES: material.EnableKeyword(allowColorGradingACESHDR ? ShaderKeywordStrings.TonemapACES : ShaderKeywordStrings.TonemapNeutral); break;
+                        case TonemappingMode.ACES_UE5: material.EnableKeyword(allowColorGradingACESHDR ? ShaderKeywordStrings.TonemapACES_UE5 : ShaderKeywordStrings.TonemapNeutral); break;
                         default: break; // None
                     }
 

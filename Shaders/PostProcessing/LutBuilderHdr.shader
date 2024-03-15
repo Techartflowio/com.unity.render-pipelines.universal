@@ -1,7 +1,7 @@
 Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
 {
     HLSLINCLUDE
-        #pragma multi_compile_local _ _TONEMAP_ACES _TONEMAP_NEUTRAL
+        #pragma multi_compile_local _ _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_ACES_UE5
         #pragma multi_compile_local_fragment _ HDR_COLORSPACE_CONVERSION
 
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -58,6 +58,9 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
             #ifdef _TONEMAP_ACES
                 // In ACES workflow we return graded color in ACEScg, we move to ACES (AP0) later on
                 return gradedColor;
+            #elif _TONEMAP_ACES_UE5
+                // In UE5 ACES workflow we return graded color in ACEScg, we move to ACES (AP0) later on
+                return gradedColor;
             #elif defined(HDR_COLORSPACE_CONVERSION) // HDR but not ACES workflow
                 // If we are doing HDR we expect grading to finish at Rec2020. Any supplemental rotation is done inside the various options.
                 return RotateRec709ToRec2020(gradedColor);
@@ -79,7 +82,8 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
             colorLinear = LMSToLinear(colorLMS);
 
             // Do contrast in log after white balance
-            #if _TONEMAP_ACES
+            /////////////////UE_ACES_BEGIN/////////////////
+            #if _TONEMAP_ACES || _TONEMAP_ACES_UE5
             float3 colorLog = ACES_to_ACEScc(unity_to_ACES(colorLinear));
             #else
             float3 colorLog = LinearToLogC(colorLinear);
@@ -87,12 +91,13 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
 
             colorLog = (colorLog - ACEScc_MIDGRAY) * _HueSatCon.z + ACEScc_MIDGRAY;
 
-            #if _TONEMAP_ACES
+            #if _TONEMAP_ACES || _TONEMAP_ACES_UE5
             colorLinear = ACES_to_ACEScg(ACEScc_to_ACES(colorLog));
             #else
             colorLinear = LogCToLinear(colorLog);
             #endif
-
+            /////////////////UE_ACES_END/////////////////
+            
             // Color filter is just an unclipped multiplier
             colorLinear *= _ColorFilter.xyz;
 
@@ -185,7 +190,7 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
             colorLinear = max(0.0, colorLinear);
             return RotateToColorGradeOutputSpace(colorLinear);
         }
-
+/////////////////UE_ACES_BEGIN/////////////////
         float3 Tonemap(float3 colorLinear)
         {
             #if _TONEMAP_NEUTRAL
@@ -198,6 +203,12 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
                 float3 aces = ACEScg_to_ACES(colorLinear);
                 colorLinear = AcesTonemap(aces);
             }
+            #elif _TONEMAP_ACES_UE5
+            {
+                // Note: input is actually ACEScg (AP1 w/ linear encoding)
+                float3 aces = ACEScg_to_ACES(colorLinear);
+                colorLinear = ACES_UE5(aces);
+            }
             #endif
 
             return colorLinear;
@@ -207,6 +218,9 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
         {
             #ifdef HDR_COLORSPACE_CONVERSION
                 #ifdef _TONEMAP_ACES
+                float3 aces = ACEScg_to_ACES(colorLinear);
+                return HDRMappingACES(aces.rgb, PaperWhite, MinNits, MaxNits, RangeReductionMode, true);
+                #elif _TONEMAP_ACES_UE5
                 float3 aces = ACEScg_to_ACES(colorLinear);
                 return HDRMappingACES(aces.rgb, PaperWhite, MinNits, MaxNits, RangeReductionMode, true);
                 #elif _TONEMAP_NEUTRAL
@@ -219,6 +233,7 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
 
             return colorLinear;
         }
+/////////////////UE_ACES_END/////////////////
 
         float4 FragLutBuilderHdr(Varyings input) : SV_Target
         {

@@ -3,6 +3,9 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+/////////////////UE_ACES_BEGIN/////////////////
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ACES_UE5.hlsl"
+/////////////////UE_ACES_END///////////////////
 
 #if _FXAA
 // Notes on FXAA:
@@ -98,17 +101,23 @@ half3 ApplyVignette(half3 input, float2 uv, float2 center, float intensity, floa
     return input * lerp(color, (1.0).xxx, vfactor);
 }
 
+
+/////////////////UE_ACES_BEGIN/////////////////
 half3 ApplyTonemap(half3 input)
 {
 #if _TONEMAP_ACES
     float3 aces = unity_to_ACES(input);
     input = AcesTonemap(aces);
+#elif _TONEMAP_UE4ACES
+    float3 aces = unity_to_ACES(input);
+    input = ACES_UE5(aces);
 #elif _TONEMAP_NEUTRAL
     input = NeutralTonemap(input);
 #endif
 
     return saturate(input);
 }
+/////////////////UE_ACES_END///////////////////
 
 half3 ApplyColorGrading(half3 input, float postExposure, TEXTURE2D_PARAM(lutTex, lutSampler), float3 lutParams, TEXTURE2D_PARAM(userLutTex, userLutSampler), float3 userLutParams, float userLutContrib)
 {
